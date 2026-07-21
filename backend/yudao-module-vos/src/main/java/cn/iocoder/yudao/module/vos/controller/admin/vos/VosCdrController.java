@@ -13,8 +13,6 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
@@ -37,9 +35,6 @@ public class VosCdrController {
     @Resource
     private JdbcTemplate clickHouseJdbcTemplate;
 
-    private static final DateTimeFormatter YMD = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final DateTimeFormatter Y_M_D = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-
     @PostMapping("/query-from-vos/{instanceId}")
     @Operation(summary = "智能话单查询（ClickHouse ODS）")
     @Parameter(name = "instanceId", description = "VOS 实例主键", required = true)
@@ -55,23 +50,23 @@ public class VosCdrController {
         }
         String vosId = instance.getVosId();
 
-        // 时间窗：yyyyMMdd -> yyyy-MM-dd（用于 toDate(toDateTime(coalesce(recordstarttime, 0))) 比较）
-        String begin = toChDate(reqVO.getBeginTime());
-        String end = toChDate(reqVO.getEndTime());
-        if (begin == null || end == null) {
-            return success(errorResult("begin_time / end_time 格式应为 yyyyMMdd", 0L, instanceId, instance.getName()));
+        // 时间窗自适应解析：毫秒时间戳比较
+        Long beginMs = parseTimeToMillis(reqVO.getBeginTime(), false);
+        Long endMs = parseTimeToMillis(reqVO.getEndTime(), true);
+        if (beginMs == null || endMs == null) {
+            return success(errorResult("begin_time / end_time 格式应为 yyyyMMdd 或 yyyy-MM-dd HH:mm:ss", 0L, instanceId, instance.getName()));
         }
 
         int page = (reqVO.getPage() == null || reqVO.getPage() < 1) ? 1 : reqVO.getPage();
         int size = (reqVO.getPageSize() == null || reqVO.getPageSize() < 1) ? 20 : Math.min(reqVO.getPageSize(), 1000);
 
-        // WHERE 条件拼装
+        // WHERE 条件拼装：直接使用 Int64 毫秒时间戳区间比较，避免函数转换导致的报错与性能开销
         StringBuilder where = new StringBuilder(
-                "WHERE vos_id = ? AND toDate(toDateTime(coalesce(recordstarttime, 0) / 1000)) BETWEEN ? AND ?");
+                "WHERE vos_id = ? AND recordstarttime BETWEEN ? AND ?");
         List<Object> params = new ArrayList<>();
         params.add(vosId);
-        params.add(begin);
-        params.add(end);
+        params.add(beginMs);
+        params.add(endMs);
 
         List<String> accounts = reqVO.getAccountList();
         if (!accounts.isEmpty()) {
@@ -141,15 +136,67 @@ public class VosCdrController {
         }
     }
 
-    private static String toChDate(String ymd) {
-        if (ymd == null || ymd.length() != 8) {
+    private static Long parseTimeToMillis(String timeStr, boolean endIfDateOnly) {
+        if (timeStr == null || timeStr.isBlank()) {
             return null;
         }
+        String clean = timeStr.trim();
         try {
-            return LocalDate.parse(ymd, YMD).format(Y_M_D);
+            // Case 1: yyyyMMdd (8 chars)
+            if (clean.length() == 8 && clean.matches("\\d{8}")) {
+                int y = Integer.parseInt(clean.substring(0, 4));
+                int m = Integer.parseInt(clean.substring(4, 6));
+                int d = Integer.parseInt(clean.substring(6, 8));
+                return getMillis(y, m, d, endIfDateOnly);
+            }
+            // Case 2: yyyy-MM-dd (10 chars)
+            if (clean.length() == 10 && clean.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                int y = Integer.parseInt(clean.substring(0, 4));
+                int m = Integer.parseInt(clean.substring(5, 7));
+                int d = Integer.parseInt(clean.substring(8, 10));
+                return getMillis(y, m, d, endIfDateOnly);
+            }
+            // Case 3: yyyyMMddHHmmss (14 chars)
+            if (clean.length() == 14 && clean.matches("\\d{14}")) {
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMddHHmmss");
+                return sdf.parse(clean).getTime();
+            }
+            // Case 4: yyyy-MM-dd HH:mm:ss
+            if (clean.contains("-") && clean.contains(":") && clean.length() >= 19) {
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                return sdf.parse(clean.substring(0, 19)).getTime();
+            }
+            // Case 5: numeric timestamp
+            if (clean.matches("\\d+")) {
+                long val = Long.parseLong(clean);
+                // If it's in seconds (10 digits), convert to millis
+                if (clean.length() == 10) {
+                    return val * 1000L;
+                }
+                return val;
+            }
         } catch (Exception e) {
-            return null;
+            // Ignore
         }
+        return null;
+    }
+
+    private static Long getMillis(int y, int m, int d, boolean endOfDay) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.clear();
+        cal.set(y, m - 1, d);
+        if (endOfDay) {
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 23);
+            cal.set(java.util.Calendar.MINUTE, 59);
+            cal.set(java.util.Calendar.SECOND, 59);
+            cal.set(java.util.Calendar.MILLISECOND, 999);
+        } else {
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            cal.set(java.util.Calendar.MINUTE, 0);
+            cal.set(java.util.Calendar.SECOND, 0);
+            cal.set(java.util.Calendar.MILLISECOND, 0);
+        }
+        return cal.getTimeInMillis();
     }
 
     private static Map<String, Object> errorResult(String msg, Long total, Long instanceId, String instanceName) {
