@@ -16,10 +16,15 @@ until clickhouse client --host "${CH_HOST}" --port "${CH_PORT}" --query "SELECT 
 done
 echo "[clickhouse-init] clickhouse is ready."
 
+# 1. 创建后端应用所需的数据库 ykvos_ch
+echo "[clickhouse-init] creating database ykvos_ch if not exists ..."
+clickhouse client --host "${CH_HOST}" --port "${CH_PORT}" --query "CREATE DATABASE IF NOT EXISTS ykvos_ch"
+
+# 2. 依次应用 DDL 并导入到 ykvos_ch 数据库
 for f in 01_ods_vos.sql 02_kafka_ingest.sql; do
   if [ -f "${SQL_DIR}/${f}" ]; then
-    echo "[clickhouse-init] applying ${f} ..."
-    clickhouse client --host "${CH_HOST}" --port "${CH_PORT}" --multiquery < "${SQL_DIR}/${f}"
+    echo "[clickhouse-init] applying ${f} to database ykvos_ch ..."
+    clickhouse client --host "${CH_HOST}" --port "${CH_PORT}" --database "ykvos_ch" --multiquery < "${SQL_DIR}/${f}"
     echo "[clickhouse-init]   ${f} applied."
   else
     echo "[clickhouse-init] WARNING: ${SQL_DIR}/${f} not found, skipped."
@@ -27,5 +32,5 @@ for f in 01_ods_vos.sql 02_kafka_ingest.sql; do
 done
 
 echo "[clickhouse-init] schema applied. tables:"
-clickhouse client --host "${CH_HOST}" --port "${CH_PORT}" --query "SHOW TABLES FROM ykvos" 2>/dev/null || true
+clickhouse client --host "${CH_HOST}" --port "${CH_PORT}" --query "SHOW TABLES FROM ykvos_ch" 2>/dev/null || true
 echo "[clickhouse-init] done."

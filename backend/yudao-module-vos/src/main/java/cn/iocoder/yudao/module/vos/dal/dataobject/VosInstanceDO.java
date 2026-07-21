@@ -74,5 +74,6 @@ public class VosInstanceDO extends TenantBaseDO {
     /**
      * 不健康详情描述
      */
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String healthError;
 }
