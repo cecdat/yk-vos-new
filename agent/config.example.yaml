@@ -64,16 +64,23 @@ tables:
   - name: "e_cdr"
     type: "cdr"
     backfill: true
-  # ── 以下为 Phase1 维度表示例（当前注释，按需开启）──
-  # - name: "e_customer"
-  #   type: "dimension"
-  #   mode: "full"            # 整表定时重放，CH 按 (vos_id,id) 去重
-  #   interval_seconds: 300
-  # - name: "e_phone"
-  #   type: "dimension"
-  #   mode: "incremental"    # 按 id 增量
-  #   key: "id"
-  #   interval_seconds: 60
+  - name: "e_customer"
+    type: "dimension"
+    mode: "full"            # 整表定时重放，CH 按 (vos_id,id) 去重
+    interval_seconds: 300
+  - name: "e_gatewaymapping"
+    type: "dimension"
+    mode: "full"
+    interval_seconds: 300
+  - name: "e_gatewayrouting"
+    type: "dimension"
+    mode: "full"
+    interval_seconds: 300
+  - name: "e_phone"
+    type: "dimension"
+    mode: "incremental"    # 按 id 增量
+    key: "id"
+    interval_seconds: 60
 
 # ── 入站拉取端点（§3.5 双向 / 测试环境；默认关闭）──
 # 生产拓扑：平台有公网、Kafka 可达 → 保持 listen 空，agent 只用 Kafka 出站（§9 无 inbound 基线）。

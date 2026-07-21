@@ -100,7 +100,80 @@ SELECT
     JSONExtractString(data, 'dynamicValue')     AS dynamicValue,
     now()                              AS _sync_ts,
     src_table                          AS _src_table
-FROM vos_cdr_kafka;
+FROM vos_cdr_kafka
+WHERE startsWith(src_table, 'e_cdr');
+
+
+-- 3) 维度表物化视图：客户维度镜像
+DROP TABLE IF EXISTS vos_customer_mv;
+CREATE MATERIALIZED VIEW IF NOT EXISTS vos_customer_mv TO vos_customer_ods AS
+SELECT
+    vos_id                          AS vos_id,
+    JSONExtractInt(data, 'id')             AS id,
+    JSONExtractString(data, 'account')     AS account,
+    JSONExtractString(data, 'name')        AS name,
+    JSONExtractInt(data, 'type')           AS type,
+    JSONExtractInt(data, 'starttime')      AS starttime,
+    JSONExtractInt(data, 'lastupdatetime') AS lastupdatetime,
+    JSONExtractFloat(data, 'money')        AS money,
+    JSONExtractInt(data, 'validtime')      AS validtime,
+    JSONExtractInt(data, 'locktype')       AS locktype,
+    JSONExtractInt(data, 'status')         AS status,
+    JSONExtractFloat(data, 'limitmoney')   AS limitmoney,
+    JSONExtractFloat(data, 'todayconsumption') AS todayconsumption,
+    JSONExtractString(data, 'memo')        AS memo,
+    JSONExtractInt(data, 'feerategroup_id') AS feerategroup_id,
+    JSONExtractInt(data, 'feerategroupprivate_id') AS feerategroupprivate_id,
+    JSONExtractInt(data, 'customer_id')    AS customer_id,
+    JSONExtractString(data, 'timezoneid')  AS timezoneid,
+    now()                              AS _sync_ts
+FROM vos_cdr_kafka
+WHERE src_table = 'e_customer';
+
+
+-- 4) 维度表物化视图：网关映射镜像
+DROP TABLE IF EXISTS vos_gatewaymapping_mv;
+CREATE MATERIALIZED VIEW IF NOT EXISTS vos_gatewaymapping_mv TO vos_gatewaymapping_ods AS
+SELECT
+    vos_id                          AS vos_id,
+    JSONExtractInt(data, 'id')             AS id,
+    JSONExtractString(data, 'name')        AS name,
+    JSONExtractInt(data, 'locktype')       AS locktype,
+    JSONExtractInt(data, 'calllevel')      AS calllevel,
+    JSONExtractInt(data, 'capacity')       AS capacity,
+    JSONExtractInt(data, 'priority')       AS priority,
+    JSONExtractInt(data, 'registertype')   AS registertype,
+    JSONExtractString(data, 'remoteips')   AS remoteips,
+    JSONExtractInt(data, 'rtpforwardtype') AS rtpforwardtype,
+    JSONExtractString(data, 'gatewaygroups') AS gatewaygroups,
+    JSONExtractString(data, 'routinggatewaygroups') AS routinggatewaygroups,
+    JSONExtractString(data, 'memo')        AS memo,
+    JSONExtractInt(data, 'customer_id')    AS customer_id,
+    JSONExtractInt(data, 'mbx_id')         AS mbx_id,
+    now()                              AS _sync_ts
+FROM vos_cdr_kafka
+WHERE src_table = 'e_gatewaymapping';
+
+
+-- 5) 维度表物化视图：费率组镜像
+DROP TABLE IF EXISTS vos_feerate_mv;
+CREATE MATERIALIZED VIEW IF NOT EXISTS vos_feerate_mv TO vos_feerate_ods AS
+SELECT
+    vos_id                          AS vos_id,
+    JSONExtractInt(data, 'id')             AS id,
+    JSONExtractString(data, 'feeprefix')   AS feeprefix,
+    JSONExtractString(data, 'areacode')    AS areacode,
+    JSONExtractInt(data, 'locktype')       AS locktype,
+    JSONExtractFloat(data, 'fee')          AS fee,
+    JSONExtractFloat(data, 'tax')          AS tax,
+    JSONExtractInt(data, 'period')         AS period,
+    JSONExtractFloat(data, 'ivrfee')       AS ivrfee,
+    JSONExtractInt(data, 'ivrperiod')      AS ivrperiod,
+    JSONExtractInt(data, 'type')           AS type,
+    JSONExtractInt(data, 'feerategroup_id') AS feerategroup_id,
+    now()                              AS _sync_ts
+FROM vos_cdr_kafka
+WHERE src_table = 'e_feerate';
 
 -- 3) 校验：查看消费进度 / 落库行数（按节点）
 -- SELECT vos_id, count() FROM vos_cdr_ods GROUP BY vos_id;

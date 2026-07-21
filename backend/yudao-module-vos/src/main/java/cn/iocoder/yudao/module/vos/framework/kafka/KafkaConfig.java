@@ -40,6 +40,11 @@ public class KafkaConfig {
     public static final String TOPIC_BACKFILL_DATA = "vos.agent.backfill.data";
 
     /**
+     * 实时话单与维度同步数据通道
+     */
+    public static final String TOPIC_CDR_LIVE = "vos.cdr.live";
+
+    /**
      * Agent 上报消息专用的消费者工厂。
      *
      * <p><b>关键原因：</b>Agent 端使用 Go(kafka-go) 直接发送「原始 JSON 字节」，不会带上 Spring Kafka

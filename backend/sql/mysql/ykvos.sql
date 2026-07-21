@@ -5791,3 +5791,26 @@ SET `status` = 1, `visible` = b'0'
 WHERE `parent_id` = 0 AND `id` NOT IN (1, 2, 5011, 5050);
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- ----------------------------
+-- VOS 客户本地镜像缓存表 (VosCustomer)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `vos_customer` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '编号',
+    `tenant_id`        BIGINT       NOT NULL DEFAULT 0 COMMENT '租户编号',
+    `vos_id`           VARCHAR(64)  NOT NULL COMMENT 'Agent 实例 ID（如 vos1）',
+    `customer_id`      INT          NOT NULL COMMENT 'VOS 侧 e_customer.id',
+    `account`          VARCHAR(64)  NOT NULL COMMENT '客户账号',
+    `name`             VARCHAR(128) NOT NULL DEFAULT '' COMMENT '客户名称',
+    `money`            DECIMAL(16, 4) NOT NULL DEFAULT 0.0000 COMMENT '当前可用余额 (元)',
+    `limitmoney`       DECIMAL(16, 4) NOT NULL DEFAULT 0.0000 COMMENT '信用额度限额 (元)',
+    `todayconsumption` DECIMAL(16, 4) NOT NULL DEFAULT 0.0000 COMMENT '今日已扣除消费 (元)',
+    `status`           TINYINT      NOT NULL DEFAULT 0 COMMENT '状态：0 激活正常，1 欠费锁定/挂起',
+    `feerategroup_id`  INT          DEFAULT NULL COMMENT '挂载费率组 ID',
+    `create_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted`          BIT(1)       NOT NULL DEFAULT b'0' COMMENT '是否删除',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_vos_customer` (`vos_id`, `customer_id`),
+    KEY `idx_tenant` (`tenant_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'VOS 客户本地镜像缓存';
