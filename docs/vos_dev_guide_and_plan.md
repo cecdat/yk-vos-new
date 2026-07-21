@@ -1,6 +1,6 @@
 # VOS3000 数据中台功能设计、开发指导手册与项目排期计划
 
-本文件作为 YK-VOS 数据中台二期核心功能开发的技术指引、功能设计与项目管理基准。所有前后端开发人员在编码和页面设计过程中必须严格遵守本规范。
+本文件作为 YK-VOS 数据中台二期核心功能开发的技术指引、功能设计与项目管理基准。所有前后端开发人员在编码和页面设计过程中必须严格遵守本规范，可直接根据本指南执行开发与代码实现。
 
 ---
 
@@ -22,109 +22,211 @@
 
 ---
 
-## 二、 数据库直读与 VOS API 结合运作原理 (CQRS 闭环流程)
+## 二、 模块联动与业务闭环原理 (CQRS & Linkage Logic)
 
-中台通过双通道闭环实现读写分离：
+中台不仅是数据的展示窗口，更承载着跨模块的安全控制联动：
 
 ```
-[前端页面] (查看数据) ──► 1. 读中台数据库 ──► 展现已绑定的 100 万个号码 (毫秒级，无压力)
-   │
-[执行回收/删除]
-   │
-   ▼
-2. 发送 RECYCLE_PHONE 指令 (通过 Kafka)
-   │
-   ▼
-3. Go Agent ──► 4. 调用本地 WebExternal API (/DeletePhone)
-                       │
-                       ▼
-                 5. VOS 内存路由表实时生效 (无延迟)
-                       │ (VOS 核心自动写盘)
-                       ▼
-                 6. VOS 本地 MySQL (删除 e_phone 记录)
-                       │
-                       ▼
-                 7. 增量/定时同步上报 ──► 8. 刷回中台数据库 (数据一致性闭环)
+                    ┌─────────────────────────┐
+                    │  ClickHouse 话路质量监控 │
+                    └────────────┬────────────┘
+                                 │ 挂断率异常 / PDD 延时飙升
+                                 ▼
+┌────────────────────────┐  联动阻断  ┌────────────────────────┐
+│   对接/落地网关并发水位 │ ─────────► │ 号码资产/路由回收删除   │
+│   (Element 进度条监控)  │            │ (调用 VOS DeletePhone)  │
+└────────────────────────┘            └────────────────────────┘
+            ▲                                      ▲
+            │ 扣费引发余额不足                       │ 号码回收同步删除
+            │                                      │
+┌────────────────────────┐            ┌────────────┴───────────┐
+│     客户可用余额控制    │ ─────────► │ VOS 本地 MySQL 与内存   │
+│   (余额 <= 信用额度)    │  一键冻结  │ 路由状态更新            │
+└────────────────────────┘            └────────────────────────┘
 ```
+
+### 1. 客户余额与网关呼叫阻断联动
+* **联动机制**：每个客户账户的呼叫通过特定对接网关接入。当计费模块从话单流水累计扣减余额，导致客户可用余额低于信用额度（`money <= limitmoney`）时，中台风控服务检测到后将自动调用 VOS 控制接口，触发 `SET_STATUS` 指令锁定该客户（`status = 1`）。
+* **VOS 侧联动表现**：VOS 本地接收到账户锁定指令后，会瞬间拒绝来自该客户对接网关的所有新呼叫请求，已在通话中的信道将根据 VOS 系统配置在 30 秒至 1 分钟内强行挂断，实现物理级话路切断，杜绝恶意刷单和欠费损失。
+
+### 2. 号码解绑回收与网关活动信道联动
+* **联动机制**：当管理员在“号码资产管理”页面选中号码 `800801` 并执行“回收删除”时，中台向 Agent 下发 `DeletePhone` API 调用指令。
+* **VOS 侧联动表现**：WebExternal 接口被调用后，VOS 核心路由引擎会在**内存中瞬间卸载**挂载在该号码上的主/被叫路由映射，并向占用该号码信道的正在通话流发送 `BYE` 挂断信号，活动话单立刻中止结算，网关并发占用数同步下摆释放。
 
 ---
 
-## 三、 各功能模块详细设计 (Functional Specifications)
+## 三、 数据层接口规则与参数约定 (API Rules)
 
-### 模块一：多节点客户财务管理与控制中心
+### 1. 统一接口响应规范
+所有数据中台面向前端的 HTTP 接口返回数据结构遵循 Ruoyi-Vue-Pro 的 `CommonResult` 标准：
+```json
+{
+  "code": 0,          // 0 表示成功，非 0 表示系统级或业务级错误
+  "msg": "",          // 错误信息描述
+  "data": {}          // 业务响应体
+}
+```
 
-#### 1. 界面与交互设计
-* **顶部过滤区**：VOS 节点下拉框、账号/名称输入框、状态筛选（全部/正常/已冻结）、余额预警开关。
-* **中部 KPI 指标组**：
-  * 客户总数（内置 `lucide:users` 图标）。
-  * 透支预警数（可用余额 <= 信用额度 + 100 元，显示红色警报文字）。
-  * 已冻结账户数（显示红色 Badge）。
-* **表格列定义**：`VOS节点` | `账户账号` | `客户名称` | `当前可用余额 (元)` | `今日已扣消费 (元)` | `信用限额 (元)` | `状态` | `最近更新时间` | `操作`
-* **右侧/弹窗操作**：
-  * **调整限额**：点击弹出 Dialog，输入新的限额数值（支持正负数）。
-  * **冻结/解冻**：点击弹出二次确认 Dialog，下发冻结 status 状态指令。
+### 2. 时间精度与格式约定
+* **前端传入参数**：时间筛选器必须为 `type="datetime"`，传给后端的字段统一为 `YYYY-MM-DD HH:mm:ss`（例如 `"2026-07-21 23:59:59"`）。
+* **接口数据处理**：前端通过 `formatYmd` 清洗发送时，日期中的横杠会被剔除（即 `"20260721 23:59:59"`）。
+* **后端解析策略**：后端 `parseTimeToMillis` 必须兼容包含空格和冒号的 `yyyyMMdd HH:mm:ss`，并转化为 Unix 毫秒时间戳与 ClickHouse 中的 `recordstarttime`（`Int64` 毫秒级）对齐。
+* **列表展现格式**：从 ClickHouse 读出的时间戳字段，前端一律通过 `formatTs` 转换为 `yyyy-MM-dd HH:mm:ss`，精确到秒。
 
-#### 2. 后端 API 接口定义
-* **客户列表分页查询**：`GET /admin-api/vos/customer/page`
-* **控制指令下发**：`POST /admin-api/vos/customer/control`
-  * 请求体：
-    ```json
-    {
-      "vosId": "vos1",
+---
+
+## 四、 Kafka 指令协议规范 (Kafka Command Payload Schema)
+
+控制通道主题统一为：`vos.control`，生产者与消费者交互的消息体格式采用 JSON 封装，核心参数规范如下：
+
+### 1. 修改信用额度 (`UPDATE_LIMIT`)
+* **适用场景**：对指定客户进行可用透支信用额度的上调或下调。
+* **Kafka 消息荷载 (Payload)**：
+  ```json
+  {
+    "vosId": "vos1",
+    "timestamp": 1784678399000,
+    "cmd": "UPDATE_LIMIT",
+    "data": {
       "customerId": 101,
-      "action": "UPDATE_LIMIT",  // UPDATE_LIMIT / SET_STATUS
-      "limitValue": -1000.00,    // 仅在 action = UPDATE_LIMIT 时有效
-      "statusValue": 1           // 仅在 action = SET_STATUS 时有效 (0: 正常, 1: 冻结)
+      "account": "CECDAT_SIP",
+      "limitmoney": -1000.00
     }
-    ```
+  }
+  ```
+
+### 2. 冻结/解冻客户账户 (`SET_STATUS`)
+* **适用场景**：因欠费阻断或手动管控，锁定/解锁指定账户。
+* **Kafka 消息荷载 (Payload)**：
+  ```json
+  {
+    "vosId": "vos1",
+    "timestamp": 1784678399000,
+    "cmd": "SET_STATUS",
+    "data": {
+      "customerId": 101,
+      "account": "CECDAT_SIP",
+      "status": 1                 // 0: 正常/激活, 1: 冻结/挂起
+    }
+  }
+  ```
+
+### 3. 号码回收/删除 (`RECYCLE_PHONE`)
+* **适用场景**：从网关上批量卸载并删除 E.164 电话号码。
+* **Kafka 消息荷载 (Payload)**：
+  ```json
+  {
+    "vosId": "vos1",
+    "timestamp": 1784678399000,
+    "cmd": "RECYCLE_PHONE",
+    "data": {
+      "e164s": ["800801", "800802"]
+    }
+  }
+  ```
 
 ---
 
-### 模块二：话单对账与利润多维统计分析
+## 五、 开发者 ClickHouse SQL 实现参考 (ClickHouse SQL Blueprints)
 
-#### 1. 界面与交互设计
-* **顶部过滤区**：精确到秒的开始/结束时间选择器 (DateTime Range)、VOS节点过滤。
-* **顶部 KPI 统计**：总收入 (`fee` 汇总)、总成本 (`agentfee` 汇总)、净利润 (`fee - agentfee`)、毛利率。
-* **中部 Tab 切换页**：
-  * **客户对账报表**：按 `customeraccount` 聚合。列定义：`客户账号` | `通话总次数` | `计费时长 (分钟)` | `应收费用 (收入)` | `落地成本` | `净利润`
-  * **渠道成本报表**：按 `agentaccount` 聚合。列定义：`供应商账号` | `通话总次数` | `落地计费时长` | `应付费用 (成本)` | `接入费用` | `净利润`
-  * **网关路由分析**：按对接网关、落地网关组合聚合。列定义：`对接网关` | `落地网关` | `通话总次数` | `总接通率` | `平均通话时长 (秒)` | `净利润贡献`
+开发者在实现控制层和报表统计服务时，可直接参考并复用以下高吞吐 SQL 原型：
 
-#### 2. 后端 API 接口定义
-* **毛利统计 KPI 查询**：`GET /admin-api/vos/report/margin-kpi`
-* **分组报表数据查询**：`GET /admin-api/vos/report/group-margin`
-  * 参数：`beginTime`, `endTime`, `vosId`, `groupBy` ("customer" / "agent" / "gateway")
+### 1. 客户/供应商多维利润及对账统计（模块二）
+* **SQL 逻辑说明**：利用 ODS 话单表的 `fee`（接入收入）与 `agentfee`（落地成本）直接在 ClickHouse 侧进行秒级聚合，过滤通话时间范围，计算出净利润与毛利率。
+* **SQL 代码**：
+  ```sql
+  SELECT
+      customeraccount AS account,
+      count() AS callCount,
+      sum(feetime) / 60 AS billingDurationMinutes,
+      sum(fee) AS revenue,
+      sum(agentfee) AS cost,
+      sum(fee) - sum(agentfee) AS profit,
+      if(sum(fee) > 0, round((sum(fee) - sum(agentfee)) / sum(fee) * 100, 2), 0.0) AS profitRate
+  FROM ykvos_ch.vos_cdr_ods
+  WHERE vos_id = 'vos1'
+    AND recordstarttime BETWEEN 1783958400000 AND 1784678399999
+  GROUP BY customeraccount
+  ORDER BY profit DESC;
+  ```
+
+### 2. 网关负载并发实时统计（模块三）
+* **SQL 逻辑说明**：根据未挂断话单（即 `stoptime = 0` 或没有收到挂断事件的话单数）统计各网关的当前活跃呼叫数。
+* **SQL 代码**：
+  ```sql
+  SELECT
+      calleegatewayid AS gatewayName,
+      count() AS activeCalls
+  FROM ykvos_ch.vos_cdr_ods
+  WHERE vos_id = 'vos1'
+    AND stoptime = 0 -- 通话尚未结束，即为活动并发
+  GROUP BY calleegatewayid;
+  ```
+
+### 3. 网关质量 KPI (ASR/ALOC) 分析
+* **SQL 代码**：
+  ```sql
+  SELECT
+      calleegatewayid AS gatewayName,
+      count() AS totalCalls,
+      countIf(feetime > 0) AS answeredCalls,
+      round(countIf(feetime > 0) / count() * 100, 2) AS asr, -- 接通率
+      if(countIf(feetime > 0) > 0, round(sum(feetime) / countIf(feetime > 0), 0), 0) AS aloc -- 平均通话时长(秒)
+  FROM ykvos_ch.vos_cdr_ods
+  WHERE vos_id = 'vos1'
+  GROUP BY calleegatewayid;
+  ```
 
 ---
 
-### 模块三：网关通路与并发水域预警监控
+## 六、 Go Agent 与 WebExternal 本地代理对接细节 (Go Agent & HTTP Call)
 
-#### 1. 界面与交互设计
-* **顶部概览卡片**：当前全局并发数（全节点活动呼叫数）、超载警告网关数。
-* **监控表格**：`VOS节点` | `网关名称` | `类型` (对接/落地) | `并发上限` | `当前并发数` | `并发装载率 (Element 进度条)` | `接通率 (ASR)` | `平均时长 (ALOC)` | `PDD延时 (ms)`
-  * **水位进度条颜色规则**：使用 `<IconifyIcon>` 进行状态标示。装载率 `< 70%` 显示绿色；`70% - 90%` 显示黄色；`>= 90%` 时显示红色警示并高亮闪烁。
-* **操作列**：“网关扩容”按钮，点击弹窗可输入新并发数。
+Go Agent 在 VOS 节点本地执行配置更新时，其工作细节必须满足以下规定：
 
-#### 2. 后端 API 接口定义
-* **网关状态装载率列表**：`GET /admin-api/vos/gateway/load-status`
-* **网关并发扩容控制**：`POST /admin-api/vos/gateway/control` (调用 VOS API `UpdateGateway` 指令)
+### 1. HTTP 交互协议
+* **目标基地址**：`http://127.0.0.1:9090/external/server/{ActionName}`
+* **请求头**：
+  * `Content-Type: application/x-www-form-urlencoded;charset=UTF-8`
+* **接口认证说明**：
+  * VOS3000 WebExternal 采用基于 IP 白名单机制进行鉴权，Agent 直接部署在 VOS 本机通过 `127.0.0.1` 环回接口通信，天然免除账号登录会话，极大简化了控制流程，提高了指令下发成功率。
+
+### 2. 接口参数与执行体示例 (以号码解绑为例)
+Go Agent 接收到 `RECYCLE_PHONE` 消息后，将以批量/单条方式调用 VOS 节点上的本地 HTTP 接口：
+```go
+// 伪代码示例：Go Agent 本地向 VOS HTTP 发起号码删除
+func deleteE164(e164 string) (bool, error) {
+    url := "http://127.0.0.1:9090/external/server/DeletePhone"
+    
+    // 组装 VOS WebExternal 格式的请求参数：JSON String
+    params := map[string]string{
+        "e164": e164,
+    }
+    jsonData, _ := json.Marshal(params)
+    
+    // 发送 x-www-form-urlencoded 请求，Body 为上面序列化后的 JSON 字符串
+    resp, err := httpClient.Post(url, "application/x-www-form-urlencoded;charset=UTF-8", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return false, err
+    }
+    defer resp.Body.Close()
+    
+    // 解析返回 JSON
+    var vosResult struct {
+        RetCode   int    `json:"retCode"`
+        Exception string `json:"exception"`
+    }
+    json.NewDecoder(resp.Body).Decode(&vosResult)
+    
+    if vosResult.RetCode == 0 {
+        return true, nil // 执行成功，内存与库已同步生效
+    }
+    return false, fmt.Errorf("vos error: %s (code: %d)", vosResult.Exception, vosResult.RetCode)
+}
+```
 
 ---
 
-### 模块四：号码资产管理 (VOS API 代理)
-
-#### 1. 界面与交互设计
-* **监控表格**：`VOS节点` | `电话号码 (E.164)` | `绑定客户账户` | `最大并发数` | `创建时间` | `操作`
-* **操作列**：“导入号码”按钮（支持批量文本框导入并调用 WebExternal 的 `AddPhone` 接口）、“回收删除”按钮（调用 WebExternal 的 `DeletePhone` 接口）。
-
-#### 2. 后端 API 接口定义
-* **号码回收/删除**：`POST /admin-api/vos/phone/recycle`
-  * 请求体：`{"vosId": "vos1", "e164s": ["800801", "800802"]}`
-  * Go Agent 代理执行：本地向端口 9090 发送 `/external/server/DeletePhone` 接口，回执 `retCode == 0` 表示成功。
-
----
-
-## 四、 前后端开发目录指引
+## 七、 前后端开发目录指引
 
 * **前端视图代码**：`frontend/apps/web-ele/src/views/vos/`
   * 客户管理：`vos/customer/index.vue`
@@ -140,7 +242,7 @@
 
 ---
 
-## 五、 项目版本发布管理与开发排期进度
+## 八、 项目版本发布管理与开发排期进度
 
 ### 1. 严格版本升级管理规范
 在编译打包生成部署包时，**严禁使用重复的版本号**。每次打包必须递增 Patch（修订号），确保环境升级自愈。
