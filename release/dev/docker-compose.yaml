@@ -67,6 +67,7 @@ services:
     image: docker.1ms.run/bitnami/kafka:3.4.1
     container_name: yk-kafka
     restart: unless-stopped
+    user: root
     ports:
       - "3001:3001"   # EXTERNAL：VOS agent 推送入口（唯一对外的 Kafka 端口，host 映射 3001）
     environment:
