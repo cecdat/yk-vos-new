@@ -176,6 +176,8 @@ export interface VosAgentHeartbeat {
   db_version: string;
   db_open_conns: number;
   db_active_conns: number;
+  db_max_conns?: number;
+  agent_pid?: number;
   agent_goroutines: number;
   agent_mem_alloc_mb: number;
   agent_uptime_seconds: number;

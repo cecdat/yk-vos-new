@@ -103,6 +103,16 @@ public class VosAgentHeartbeatDO extends TenantBaseDO {
     private Integer dbActiveConns;
 
     /**
+     * 数据库配置的最大连接数
+     */
+    private Integer dbMaxConns;
+
+    /**
+     * Agent 进程 ID
+     */
+    private Integer agentPid;
+
+    /**
      * Go协程数
      */
     private Integer agentGoroutines;

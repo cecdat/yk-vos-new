@@ -42,6 +42,25 @@ function formatUptime(sec?: number): string {
   return `${m}分`;
 }
 
+/** 格式化 ISO 时间为 yyyy-MM-dd HH:mm:ss 格式 */
+function formatDateTime(val?: string): string {
+  if (!val) return '-';
+  const tIdx = val.indexOf('T');
+  if (tIdx === -1) return val;
+  const datePart = val.substring(0, tIdx);
+  let timePart = val.substring(tIdx + 1);
+  const dotIdx = timePart.indexOf('.');
+  if (dotIdx !== -1) {
+    timePart = timePart.substring(0, dotIdx);
+  } else {
+    const plusIdx = timePart.indexOf('+');
+    if (plusIdx !== -1) {
+      timePart = timePart.substring(0, plusIdx);
+    }
+  }
+  return `${datePart} ${timePart}`;
+}
+
 onMounted(load);
 </script>
 
@@ -118,7 +137,7 @@ onMounted(load);
           <div>
             <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
               <span>内存使用率</span>
-              <span class="text-slate-700 dark:text-zinc-200">{{ h.mem_used_mb }} / {{ h.mem_total_mb }} MB ({{ pct(h.mem_used_mb, h.mem_total_mb) }}%)</span>
+              <span class="text-slate-700 dark:text-zinc-200">{{ (h.mem_used_mb / 1024).toFixed(2) }} / {{ (h.mem_total_mb / 1024).toFixed(2) }} GB ({{ pct(h.mem_used_mb, h.mem_total_mb) }}%)</span>
             </div>
             <ElProgress
               :percentage="pct(h.mem_used_mb, h.mem_total_mb)"
@@ -131,7 +150,7 @@ onMounted(load);
           <div>
             <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
               <span>磁盘空间</span>
-              <span class="text-slate-700 dark:text-zinc-200">已用 {{ h.disk_used_mb }} / {{ h.disk_total_mb }} MB ({{ pct(h.disk_used_mb, h.disk_total_mb) }}%)</span>
+              <span class="text-slate-700 dark:text-zinc-200">已用 {{ (h.disk_used_mb / 1024).toFixed(2) }} / {{ (h.disk_total_mb / 1024).toFixed(2) }} GB ({{ pct(h.disk_used_mb, h.disk_total_mb) }}%)</span>
             </div>
             <ElProgress
               :percentage="pct(h.disk_used_mb, h.disk_total_mb)"
@@ -149,7 +168,7 @@ onMounted(load);
             </div>
             <div>
               <span class="text-slate-400 dark:text-zinc-500">DB 连接数:</span>
-              <span class="ml-1 text-slate-700 dark:text-zinc-200 font-medium">{{ h.db_open_conns }}开 / {{ h.db_active_conns }}活</span>
+              <span class="ml-1 text-slate-700 dark:text-zinc-200 font-medium">{{ h.db_active_conns ?? 0 }}活 / {{ h.db_max_conns ?? '-' }}最大</span>
             </div>
             <div>
               <span class="text-slate-400 dark:text-zinc-500">主机运行:</span>
@@ -157,14 +176,14 @@ onMounted(load);
             </div>
             <div>
               <span class="text-slate-400 dark:text-zinc-500 font-semibold text-sky-600 dark:text-sky-400">Agent:</span>
-              <span class="ml-1 text-slate-600 dark:text-zinc-300">G: {{ h.agent_goroutines }} | {{ h.agent_mem_alloc_mb }}M</span>
+              <span class="ml-1 text-slate-600 dark:text-zinc-300">PID: {{ h.agent_pid || '-' }} | {{ h.agent_mem_alloc_mb }} MB</span>
             </div>
           </div>
 
           <!-- Agent Uptime & Last Reported -->
           <div class="pt-3 border-t border-slate-100 dark:border-zinc-800 flex justify-between items-center text-[11px] text-slate-400 dark:text-zinc-500">
             <span>Agent 运行: <strong class="text-slate-600 dark:text-zinc-400">{{ formatUptime(h.agent_uptime_seconds) }}</strong></span>
-            <span>最近上报: {{ h.generated_at }}</span>
+            <span>最近上报: {{ formatDateTime(h.generated_at) }}</span>
           </div>
         </div>
       </div>

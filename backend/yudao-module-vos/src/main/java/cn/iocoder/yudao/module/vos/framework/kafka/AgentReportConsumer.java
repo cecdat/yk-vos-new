@@ -177,14 +177,16 @@ public class AgentReportConsumer {
             heartbeat.setDbConnected(db.getConnected())
                     .setDbVersion(db.getVersion())
                     .setDbOpenConns(db.getOpenConnections())
-                    .setDbActiveConns(db.getActiveConnections());
+                    .setDbActiveConns(db.getActiveConnections())
+                    .setDbMaxConns(db.getMaxConnections());
         }
 
         if (msg.getAgent() != null) {
             ReportMessage.AgentMetrics ag = msg.getAgent();
             heartbeat.setAgentGoroutines(ag.getGoroutines())
                     .setAgentMemAllocMb(ag.getMemAllocMb())
-                    .setAgentUptimeSeconds(ag.getUptimeSeconds());
+                    .setAgentUptimeSeconds(ag.getUptimeSeconds())
+                    .setAgentPid(ag.getPid());
         }
 
         if (isNew) {

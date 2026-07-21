@@ -63,6 +63,12 @@ public class VosAgentHeartbeatRespVO {
     @JsonProperty("db_active_conns")
     private Integer dbActiveConns;
 
+    @JsonProperty("db_max_conns")
+    private Integer dbMaxConns;
+
+    @JsonProperty("agent_pid")
+    private Integer agentPid;
+
     @JsonProperty("agent_goroutines")
     private Integer agentGoroutines;
 

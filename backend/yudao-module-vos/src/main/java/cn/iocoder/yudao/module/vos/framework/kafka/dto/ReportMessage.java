@@ -103,10 +103,13 @@ public class ReportMessage {
         private Integer openConnections;
         @JsonProperty("active_connections")
         private Integer activeConnections;
+        @JsonProperty("max_connections")
+        private Integer maxConnections;
     }
 
     @Data
     public static class AgentMetrics {
+        private Integer pid;
         private Integer goroutines;
         @JsonProperty("mem_alloc_mb")
         private BigDecimal memAllocMb;

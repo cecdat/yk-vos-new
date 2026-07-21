@@ -45,9 +45,11 @@ type DBStatus struct {
 	Version           string `json:"version"`
 	OpenConnections   int    `json:"open_connections"`
 	ActiveConnections int    `json:"active_connections"`
+	MaxConnections    int    `json:"max_connections"`
 }
 
 type AgentMetrics struct {
+	PID           int     `json:"pid"`
 	Goroutines    int     `json:"goroutines"`
 	MemAllocMB    float64 `json:"mem_alloc_mb"`
 	UptimeSeconds int64   `json:"uptime_seconds"`
@@ -122,6 +124,7 @@ func (tm *TelemetryManager) report() {
 	allocMB = math.Round(allocMB*100) / 100 // 保留两位小数
 
 	agent := &AgentMetrics{
+		PID:           os.Getpid(),
 		Goroutines:    runtime.NumGoroutine(),
 		MemAllocMB:    allocMB,
 		UptimeSeconds: int64(time.Since(tm.startAt).Seconds()),
@@ -195,6 +198,7 @@ func (tm *TelemetryManager) ReportOnce() error {
 	allocMB = math.Round(allocMB*100) / 100
 
 	agent := &AgentMetrics{
+		PID:           os.Getpid(),
 		Goroutines:    runtime.NumGoroutine(),
 		MemAllocMB:    allocMB,
 		UptimeSeconds: int64(time.Since(tm.startAt).Seconds()),
@@ -250,6 +254,13 @@ func (tm *TelemetryManager) getDBStatus() *DBStatus {
 	stats := tm.db.Stats()
 	status.OpenConnections = stats.OpenConnections
 	status.ActiveConnections = stats.InUse
+
+	// 获取最大连接数配置
+	var maxConns int
+	err = tm.db.QueryRow("SELECT @@max_connections").Scan(&maxConns)
+	if err == nil {
+		status.MaxConnections = maxConns
+	}
 
 	return status
 }
