@@ -5520,6 +5520,7 @@ CREATE TABLE IF NOT EXISTS `vos_agent_heartbeat`
     `db_active_conns`    INT           DEFAULT NULL COMMENT '数据库连接数(活跃)',
     `db_max_conns`       INT           DEFAULT NULL COMMENT '数据库最大连接数',
     `agent_pid`          INT           DEFAULT NULL COMMENT 'Agent 进程 ID',
+    `delay_ms`           INT           DEFAULT NULL COMMENT '网络延时(ms)',
     `agent_goroutines`   INT           DEFAULT NULL COMMENT 'agent goroutine 数',
     `agent_mem_alloc_mb` DECIMAL(8, 2) DEFAULT NULL COMMENT 'agent 内存分配(MB)',
     `agent_uptime_seconds` BIGINT        DEFAULT NULL COMMENT 'agent 运行时长(s)',

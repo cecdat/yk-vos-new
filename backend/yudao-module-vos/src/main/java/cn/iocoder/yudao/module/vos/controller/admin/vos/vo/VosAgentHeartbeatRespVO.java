@@ -69,6 +69,9 @@ public class VosAgentHeartbeatRespVO {
     @JsonProperty("agent_pid")
     private Integer agentPid;
 
+    @JsonProperty("delay_ms")
+    private Integer delayMs;
+
     @JsonProperty("agent_goroutines")
     private Integer agentGoroutines;
 

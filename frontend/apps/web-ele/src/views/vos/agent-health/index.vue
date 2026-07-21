@@ -61,6 +61,14 @@ function formatDateTime(val?: string): string {
   return `${datePart} ${timePart}`;
 }
 
+/** 判断 Agent 在线状态（最近上报时间在 90s 内则在线） */
+function isAgentOnline(generatedAt?: string): boolean {
+  if (!generatedAt) return false;
+  const lastTime = new Date(generatedAt).getTime();
+  const nowTime = Date.now();
+  return (nowTime - lastTime) < 90000;
+}
+
 onMounted(load);
 </script>
 
@@ -82,33 +90,34 @@ onMounted(load);
       暂无 Agent 心跳数据。请确认 Agent 已启动且能连通服务端 Kafka 控制面（vos.agent.report）。
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 p-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-4">
       <div
         v-for="h in list"
         :key="h.vos_id"
         class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden"
       >
         <!-- Header -->
-        <div class="p-5 border-b border-slate-100 dark:border-zinc-800 bg-gradient-to-r from-slate-50 to-white dark:from-zinc-950 dark:to-zinc-900">
+        <div class="p-4 border-b border-slate-100 dark:border-zinc-800 bg-gradient-to-r from-slate-50 to-white dark:from-zinc-950 dark:to-zinc-900">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <span class="text-base font-bold text-slate-800 dark:text-zinc-100">
+              <span class="text-sm font-bold text-slate-800 dark:text-zinc-100">
                 {{ h.hostname || h.vos_id }}
               </span>
             </div>
             <span
               :class="[
-                'px-2.5 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5',
-                h.db_connected 
+                'px-2 py-0.5 text-[11px] font-semibold rounded-full flex items-center gap-1',
+                isAgentOnline(h.generated_at) 
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400' 
                   : 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400'
               ]"
             >
-              <span :class="['w-1.5 h-1.5 rounded-full', h.db_connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500']"></span>
-              {{ h.db_connected ? 'DB 正常' : 'DB 异常' }}
+              <span :class="['w-1.5 h-1.5 rounded-full', isAgentOnline(h.generated_at) ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500']"></span>
+              Agent {{ isAgentOnline(h.generated_at) ? '在线' : '离线' }}
+              <span class="opacity-80">({{ h.delay_ms ?? 0 }}ms)</span>
             </span>
           </div>
-          <div class="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-400 dark:text-zinc-500">
+          <div class="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-slate-400 dark:text-zinc-500">
             <span>ID: <code class="bg-slate-100 dark:bg-zinc-800 px-1 rounded">{{ h.vos_id }}</code></span>
             <span>•</span>
             <span>OS: {{ h.os }}</span>
@@ -118,16 +127,16 @@ onMounted(load);
         </div>
 
         <!-- Body -->
-        <div class="p-5 space-y-4">
+        <div class="p-4 space-y-3">
           <!-- CPU Load -->
           <div>
-            <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+            <div class="flex justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400 mb-1">
               <span>CPU 1m 负载</span>
               <span class="text-slate-700 dark:text-zinc-200">{{ h.cpu_load_1m ?? '0.00' }} / {{ h.cpu_cores }} 核</span>
             </div>
             <ElProgress
               :percentage="Math.min(100, Math.round(((h.cpu_load_1m || 0) / (h.cpu_cores || 1)) * 100))"
-              :stroke-width="6"
+              :stroke-width="5"
               :show-text="false"
               status="warning"
             />
@@ -135,33 +144,33 @@ onMounted(load);
 
           <!-- Memory Usage -->
           <div>
-            <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+            <div class="flex justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400 mb-1">
               <span>内存使用率</span>
               <span class="text-slate-700 dark:text-zinc-200">{{ (h.mem_used_mb / 1024).toFixed(2) }} / {{ (h.mem_total_mb / 1024).toFixed(2) }} GB ({{ pct(h.mem_used_mb, h.mem_total_mb) }}%)</span>
             </div>
             <ElProgress
               :percentage="pct(h.mem_used_mb, h.mem_total_mb)"
-              :stroke-width="6"
+              :stroke-width="5"
               :show-text="false"
             />
           </div>
 
           <!-- Disk Usage -->
           <div>
-            <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+            <div class="flex justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400 mb-1">
               <span>磁盘空间</span>
               <span class="text-slate-700 dark:text-zinc-200">已用 {{ (h.disk_used_mb / 1024).toFixed(2) }} / {{ (h.disk_total_mb / 1024).toFixed(2) }} GB ({{ pct(h.disk_used_mb, h.disk_total_mb) }}%)</span>
             </div>
             <ElProgress
               :percentage="pct(h.disk_used_mb, h.disk_total_mb)"
-              :stroke-width="6"
+              :stroke-width="5"
               :show-text="false"
               status="exception"
             />
           </div>
 
           <!-- Database Details -->
-          <div class="pt-3 border-t border-slate-100 dark:border-zinc-800 grid grid-cols-2 gap-y-2 text-xs">
+          <div class="pt-2.5 border-t border-slate-100 dark:border-zinc-800 grid grid-cols-2 gap-y-1.5 text-[11px]">
             <div>
               <span class="text-slate-400 dark:text-zinc-500">DB 版本:</span>
               <span class="ml-1 text-slate-700 dark:text-zinc-200 font-medium">{{ h.db_version || '-' }}</span>
@@ -181,7 +190,7 @@ onMounted(load);
           </div>
 
           <!-- Agent Uptime & Last Reported -->
-          <div class="pt-3 border-t border-slate-100 dark:border-zinc-800 flex justify-between items-center text-[11px] text-slate-400 dark:text-zinc-500">
+          <div class="pt-2.5 border-t border-slate-100 dark:border-zinc-800 flex justify-between items-center text-[10px] text-slate-400 dark:text-zinc-500">
             <span>Agent 运行: <strong class="text-slate-600 dark:text-zinc-400">{{ formatUptime(h.agent_uptime_seconds) }}</strong></span>
             <span>最近上报: {{ formatDateTime(h.generated_at) }}</span>
           </div>

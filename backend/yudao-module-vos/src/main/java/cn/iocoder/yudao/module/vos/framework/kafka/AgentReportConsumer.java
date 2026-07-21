@@ -189,6 +189,9 @@ public class AgentReportConsumer {
                     .setAgentPid(ag.getPid());
         }
 
+        long latencyMs = Math.max(0L, java.time.Duration.between(generatedTime, now).toMillis());
+        heartbeat.setDelayMs((int) latencyMs);
+
         if (isNew) {
             heartbeatMapper.insert(heartbeat);
         } else {

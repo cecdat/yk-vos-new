@@ -113,6 +113,11 @@ public class VosAgentHeartbeatDO extends TenantBaseDO {
     private Integer agentPid;
 
     /**
+     * 网络延时(ms)
+     */
+    private Integer delayMs;
+
+    /**
      * Go协程数
      */
     private Integer agentGoroutines;
