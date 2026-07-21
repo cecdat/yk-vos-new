@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import {
   ElCard,
   ElTable,
@@ -269,10 +269,42 @@ const submitThrottle = async () => {
   }
 };
 
-// 计算单个日表的百分比进度
-const getProgressPercent = (row: any) => {
-  if (!row.estimatedRows) return 0;
-  const pct = Math.floor((row.alreadyPushed / row.estimatedRows) * 100);
+// 过滤左侧日表清单：只显示「未完成」且「未加入任何任务」的日表
+const visibleAvailabilities = computed(() => {
+  const taskedTableNames = new Set<string>();
+  tasks.value.forEach((task) => {
+    if (task.tables) {
+      task.tables.forEach((t) => taskedTableNames.add(t));
+    }
+  });
+
+  return availabilities.value.filter((table) => {
+    // 过滤掉已完成 (done) 的表
+    if (table.status === 'done') {
+      return false;
+    }
+    // 过滤掉已加入任务的表
+    if (taskedTableNames.has(table.tableName)) {
+      return false;
+    }
+    return true;
+  });
+});
+
+// 计算单个任务的合并百分比进度
+const getTaskProgress = (task: any) => {
+  if (!task.tables || task.tables.length === 0) return 0;
+  let estimated = 0;
+  let pushed = 0;
+  task.tables.forEach((tableName: string) => {
+    const found = availabilities.value.find((a) => a.tableName === tableName);
+    if (found) {
+      estimated += found.estimatedRows || 0;
+      pushed += found.alreadyPushed || 0;
+    }
+  });
+  if (!estimated) return 0;
+  const pct = Math.floor((pushed / estimated) * 100);
   return pct > 100 ? 100 : pct;
 };
 
@@ -367,7 +399,7 @@ const tableNames = (row: any) => {
       <ElCol :span="12">
         <ElCard header="📅 历史日表清单及行数进度" shadow="hover" class="rounded-xl border-none">
           <ElTable
-            :data="availabilities"
+            :data="visibleAvailabilities"
             v-loading="tableLoading"
             row-key="id"
             style="width: 100%"
@@ -384,15 +416,6 @@ const tableNames = (row: any) => {
             <ElTableColumn label="已推行数" min-width="120">
               <template #default="{ row }">
                 {{ row.alreadyPushed.toLocaleString() }}
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="同步进度" min-width="150">
-              <template #default="{ row }">
-                <ElProgress
-                  :percentage="getProgressPercent(row)"
-                  :status="row.status === 'done' ? 'success' : row.status === 'syncing' ? 'warning' : ''"
-                  :stroke-width="12"
-                />
               </template>
             </ElTableColumn>
             <ElTableColumn prop="status" label="状态" width="100">
@@ -440,6 +463,15 @@ const tableNames = (row: any) => {
             <ElTableColumn label="推送量" width="110">
               <template #default="{ row }">
                 {{ (row.progressPushed || 0).toLocaleString() }}
+              </template>
+            </ElTableColumn>
+            <ElTableColumn label="同步进度" min-width="150">
+              <template #default="{ row }">
+                <ElProgress
+                  :percentage="getTaskProgress(row)"
+                  :status="row.status === 'done' ? 'success' : row.status === 'syncing' ? 'warning' : ''"
+                  :stroke-width="12"
+                />
               </template>
             </ElTableColumn>
             <ElTableColumn prop="status" label="任务状态" width="110">

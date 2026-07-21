@@ -166,8 +166,16 @@ func run() error {
 			case "cdr":
 				names := []string{t.Name}
 				if t.Name == source.RollingCDRTable {
+					// 默认仅自动同步实时表 e_cdr 和当天日表 e_cdr_YYYYMMDD（如果存在）
+					names = []string{source.RollingCDRTable}
 					if discovered, derr := src.CDRTables(ctx); derr == nil {
-						names = discovered
+						todayTable := fmt.Sprintf("e_cdr_%s", time.Now().Format("20060102"))
+						for _, dName := range discovered {
+							if dName == todayTable {
+								names = append(names, dName)
+								break
+							}
+						}
 					} else {
 						log.Error("发现 CDR 日表失败，仅同步滚动表", "err", derr.Error())
 					}
