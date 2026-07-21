@@ -51,78 +51,123 @@ onMounted(load);
       <ElButton :loading="loading" type="primary" @click="load">
         刷新
       </ElButton>
-      <span class="text-sm text-gray-500">
-        数据来源：各 VOS Agent 上报的心跳快照表（vos_agent_heart_beat）
+      <span class="text-sm text-slate-500 dark:text-zinc-400">
+        数据来源：各 VOS Agent 上报的心跳快照表（vos_agent_heartbeat）
       </span>
     </div>
 
     <div
       v-if="!loading && list.length === 0"
-      class="p-10 text-center text-gray-400"
+      class="p-10 text-center text-slate-400 dark:text-zinc-500"
     >
       暂无 Agent 心跳数据。请确认 Agent 已启动且能连通服务端 Kafka 控制面（vos.agent.report）。
     </div>
 
-    <div class="flex flex-wrap gap-4 p-4">
-      <ElCard
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 p-4">
+      <div
         v-for="h in list"
         :key="h.vos_id"
-        shadow="hover"
-        class="w-96"
+        class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden"
       >
-        <template #header>
-          <div>
-            <div class="flex items-center justify-between">
-              <span class="font-semibold">{{ h.hostname || h.vos_id }}</span>
-              <ElTag :type="h.db_connected ? 'success' : 'danger'">
-                {{ h.db_connected ? 'DB 正常' : 'DB 异常' }}
-              </ElTag>
+        <!-- Header -->
+        <div class="p-5 border-b border-slate-100 dark:border-zinc-800 bg-gradient-to-r from-slate-50 to-white dark:from-zinc-950 dark:to-zinc-900">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-base font-bold text-slate-800 dark:text-zinc-100">
+                {{ h.hostname || h.vos_id }}
+              </span>
             </div>
-            <div class="mt-1 text-xs text-gray-400">
-              {{ h.vos_id }} · {{ h.os }} · agent {{ h.agent_version }}
-            </div>
+            <span
+              :class="[
+                'px-2.5 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5',
+                h.db_connected 
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400' 
+                  : 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400'
+              ]"
+            >
+              <span :class="['w-1.5 h-1.5 rounded-full', h.db_connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500']"></span>
+              {{ h.db_connected ? 'DB 正常' : 'DB 异常' }}
+            </span>
           </div>
-        </template>
+          <div class="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-400 dark:text-zinc-500">
+            <span>ID: <code class="bg-slate-100 dark:bg-zinc-800 px-1 rounded">{{ h.vos_id }}</code></span>
+            <span>•</span>
+            <span>OS: {{ h.os }}</span>
+            <span>•</span>
+            <span>Agent: v{{ h.agent_version }}</span>
+          </div>
+        </div>
 
-        <ElDescriptions :border="true" :column="1" size="small">
-          <ElDescriptionsItem label="CPU 1m 负载">
-            {{ h.cpu_load_1m ?? '-' }}（{{ h.cpu_cores }} 核）
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="内存">
-            <div>{{ h.mem_used_mb }} / {{ h.mem_total_mb }} MB</div>
+        <!-- Body -->
+        <div class="p-5 space-y-4">
+          <!-- CPU Load -->
+          <div>
+            <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+              <span>CPU 1m 负载</span>
+              <span class="text-slate-700 dark:text-zinc-200">{{ h.cpu_load_1m ?? '0.00' }} / {{ h.cpu_cores }} 核</span>
+            </div>
+            <ElProgress
+              :percentage="Math.min(100, Math.round(((h.cpu_load_1m || 0) / (h.cpu_cores || 1)) * 100))"
+              :stroke-width="6"
+              :show-text="false"
+              status="warning"
+            />
+          </div>
+
+          <!-- Memory Usage -->
+          <div>
+            <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+              <span>内存使用率</span>
+              <span class="text-slate-700 dark:text-zinc-200">{{ h.mem_used_mb }} / {{ h.mem_total_mb }} MB ({{ pct(h.mem_used_mb, h.mem_total_mb) }}%)</span>
+            </div>
             <ElProgress
               :percentage="pct(h.mem_used_mb, h.mem_total_mb)"
+              :stroke-width="6"
               :show-text="false"
-              class="mt-1"
             />
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="磁盘">
-            <div>{{ h.disk_used_mb }} / {{ h.disk_total_mb }} MB</div>
+          </div>
+
+          <!-- Disk Usage -->
+          <div>
+            <div class="flex justify-between text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+              <span>磁盘空间</span>
+              <span class="text-slate-700 dark:text-zinc-200">已用 {{ h.disk_used_mb }} / {{ h.disk_total_mb }} MB ({{ pct(h.disk_used_mb, h.disk_total_mb) }}%)</span>
+            </div>
             <ElProgress
               :percentage="pct(h.disk_used_mb, h.disk_total_mb)"
+              :stroke-width="6"
               :show-text="false"
-              class="mt-1"
+              status="exception"
             />
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="DB 版本">
-            {{ h.db_version || '-' }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="DB 连接数">
-            {{ h.db_open_conns }} 开 / {{ h.db_active_conns }} 活跃
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="Agent 运行时">
-            goroutines {{ h.agent_goroutines }} · 内存
-            {{ h.agent_mem_alloc_mb }} MB · 运行
-            {{ formatUptime(h.agent_uptime_seconds) }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="主机运行时长">
-            {{ formatUptime(h.uptime_seconds) }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="最近上报">
-            {{ h.generated_at }}
-          </ElDescriptionsItem>
-        </ElDescriptions>
-      </ElCard>
+          </div>
+
+          <!-- Database Details -->
+          <div class="pt-3 border-t border-slate-100 dark:border-zinc-800 grid grid-cols-2 gap-y-2 text-xs">
+            <div>
+              <span class="text-slate-400 dark:text-zinc-500">DB 版本:</span>
+              <span class="ml-1 text-slate-700 dark:text-zinc-200 font-medium">{{ h.db_version || '-' }}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 dark:text-zinc-500">DB 连接数:</span>
+              <span class="ml-1 text-slate-700 dark:text-zinc-200 font-medium">{{ h.db_open_conns }}开 / {{ h.db_active_conns }}活</span>
+            </div>
+            <div>
+              <span class="text-slate-400 dark:text-zinc-500">主机运行:</span>
+              <span class="ml-1 text-slate-700 dark:text-zinc-200">{{ formatUptime(h.uptime_seconds) }}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 dark:text-zinc-500 font-semibold text-sky-600 dark:text-sky-400">Agent:</span>
+              <span class="ml-1 text-slate-600 dark:text-zinc-300">G: {{ h.agent_goroutines }} | {{ h.agent_mem_alloc_mb }}M</span>
+            </div>
+          </div>
+
+          <!-- Agent Uptime & Last Reported -->
+          <div class="pt-3 border-t border-slate-100 dark:border-zinc-800 flex justify-between items-center text-[11px] text-slate-400 dark:text-zinc-500">
+            <span>Agent 运行: <strong class="text-slate-600 dark:text-zinc-400">{{ formatUptime(h.agent_uptime_seconds) }}</strong></span>
+            <span>最近上报: {{ h.generated_at }}</span>
+          </div>
+        </div>
+      </div>
     </div>
   </Page>
 </template>
