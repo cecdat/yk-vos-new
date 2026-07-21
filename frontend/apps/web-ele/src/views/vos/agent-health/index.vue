@@ -77,31 +77,69 @@ function formatUptime(sec?: number): string {
   return `${m}分`;
 }
 
-/** 格式化 ISO 时间为 yyyy-MM-dd HH:mm:ss 格式 */
-function formatDateTime(val?: string): string {
+/** 格式化 ISO 时间/数组/时间戳为 yyyy-MM-dd HH:mm:ss 格式 */
+function formatDateTime(val?: any): string {
   if (!val) return '-';
-  const tIdx = val.indexOf('T');
-  if (tIdx === -1) return val;
-  const datePart = val.substring(0, tIdx);
-  let timePart = val.substring(tIdx + 1);
-  const dotIdx = timePart.indexOf('.');
-  if (dotIdx !== -1) {
-    timePart = timePart.substring(0, dotIdx);
-  } else {
-    const plusIdx = timePart.indexOf('+');
-    if (plusIdx !== -1) {
-      timePart = timePart.substring(0, plusIdx);
-    }
+  
+  // If array (Jackson LocalDateTime default array serialization)
+  if (Array.isArray(val)) {
+    const [y, M, d, H, m, s] = val;
+    const pad = (num: number) => String(num).padStart(2, '0');
+    return `${y}-${pad(M || 1)}-${pad(d || 1)} ${pad(H || 0)}:${pad(m || 0)}:${pad(s || 0)}`;
   }
-  return `${datePart} ${timePart}`;
+  
+  // If numeric timestamp
+  if (typeof val === 'number') {
+    const dt = new Date(val);
+    const pad = (num: number) => String(num).padStart(2, '0');
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+  }
+  
+  // If string
+  if (typeof val === 'string') {
+    const tIdx = val.indexOf('T');
+    if (tIdx === -1) {
+      const dotIdx = val.indexOf('.');
+      return dotIdx === -1 ? val : val.substring(0, dotIdx);
+    }
+    const datePart = val.substring(0, tIdx);
+    let timePart = val.substring(tIdx + 1);
+    const dotIdx = timePart.indexOf('.');
+    if (dotIdx !== -1) {
+      timePart = timePart.substring(0, dotIdx);
+    } else {
+      const plusIdx = timePart.indexOf('+');
+      if (plusIdx !== -1) {
+        timePart = timePart.substring(0, plusIdx);
+      }
+    }
+    return `${datePart} ${timePart}`;
+  }
+  
+  // Fallback
+  return String(val);
 }
 
 /** 判断 Agent 在线状态（最近上报时间在 90s 内则在线） */
-function isAgentOnline(generatedAt?: string): boolean {
+function isAgentOnline(generatedAt?: any): boolean {
   if (!generatedAt) return false;
-  const lastTime = new Date(generatedAt).getTime();
-  const nowTime = Date.now();
-  return (nowTime - lastTime) < 90000;
+  try {
+    let lastTime = 0;
+    if (Array.isArray(generatedAt)) {
+      const [y, M, d, H, m, s] = generatedAt;
+      lastTime = new Date(y, (M || 1) - 1, d || 1, H || 0, m || 0, s || 0).getTime();
+    } else if (typeof generatedAt === 'number') {
+      lastTime = generatedAt;
+    } else {
+      const strVal = String(generatedAt);
+      lastTime = new Date(strVal.replace(' ', 'T')).getTime();
+    }
+    if (isNaN(lastTime)) return false;
+    const nowTime = Date.now();
+    return (nowTime - lastTime) < 90000;
+  } catch (e) {
+    return false;
+  }
 }
 
 onMounted(load);
