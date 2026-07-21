@@ -1,0 +1,26 @@
+{
+  "source": "VOS3000MySQL",
+  "rolling_table": "e_cdr",
+  "target": "vos_cdr_ods",
+  "dedup_key": "flowno",
+  "engine": "ReplacingMergeTree(_sync_ts)",
+  "partition_by": "toDate(starttime)",
+  "count": 51,
+  "date_range": { "start": "2026-01-18", "end": "2026-03-09" },
+  "history_tables": [
+    "e_cdr_20260118", "e_cdr_20260119", "e_cdr_20260120", "e_cdr_20260121",
+    "e_cdr_20260122", "e_cdr_20260123", "e_cdr_20260124", "e_cdr_20260125",
+    "e_cdr_20260126", "e_cdr_20260127", "e_cdr_20260128", "e_cdr_20260129",
+    "e_cdr_20260130", "e_cdr_20260131",
+    "e_cdr_20260201", "e_cdr_20260202", "e_cdr_20260203", "e_cdr_20260204",
+    "e_cdr_20260205", "e_cdr_20260206", "e_cdr_20260207", "e_cdr_20260208",
+    "e_cdr_20260209", "e_cdr_20260210", "e_cdr_20260211", "e_cdr_20260212",
+    "e_cdr_20260213", "e_cdr_20260214", "e_cdr_20260215", "e_cdr_20260216",
+    "e_cdr_20260217", "e_cdr_20260218", "e_cdr_20260219", "e_cdr_20260220",
+    "e_cdr_20260221", "e_cdr_20260222", "e_cdr_20260223", "e_cdr_20260224",
+    "e_cdr_20260225", "e_cdr_20260226", "e_cdr_20260227", "e_cdr_20260228",
+    "e_cdr_20260301", "e_cdr_20260302", "e_cdr_20260303", "e_cdr_20260304",
+    "e_cdr_20260305", "e_cdr_20260306", "e_cdr_20260307", "e_cdr_20260308",
+    "e_cdr_20260309"
+  ]
+}

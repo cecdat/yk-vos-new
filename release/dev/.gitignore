@@ -1,0 +1,9 @@
+# 运行时数据（本地目录持久化，不入库）
+data/
+
+# 本地环境配置（由 .env.example 复制生成，含各 VOS 节点实际 IP）
+.env
+
+# 打包产物（由 package_server.sh 拷入，体积大，不入库）
+backend/yudao-server/target/*.jar
+frontend/dist/

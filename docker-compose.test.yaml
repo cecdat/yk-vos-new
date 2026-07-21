@@ -1,0 +1,181 @@
+# =====================================================================
+# YK-VOS 测试环境 — 数据底座 (docker-compose)
+# 适用拓扑（见 docs/VOS同步Agent规格.md §3.5）：
+#   VOS 服务器有公网；本机(平台部署测试服务器)「没有公网端口」。
+#   -> 每个 VOS 节点各跑一个 agent，在 VOS 本机起 HTTP 拉取端点(:5233)，
+#      平台侧 pull_client / 监控页 出站去拉。
+#   -> 拉回的话单落本机 ClickHouse；可选经本机 Kafka 中继以验证生产消费链路。
+#   -> 监控页(monitor) 随本 compose 一起起，轮询各节点 agent 与 ClickHouse，
+#      展示链路健康/lag（无需额外镜像，FROM scratch 运行预编译静态二进制）。
+# 镜像使用用户指定的 docker.1ms.run 镜像源（已对齐版本）。
+# 说明：redis / postgres / backend 为后续 yudao 后端预留，默认注释，启用时取消注释。
+# 注：agent 不在本 compose 内——它必须跑在 VOS 服务器本机（就近读 VOS MySQL）。
+# =====================================================================
+
+networks:
+  yknet:
+    driver: bridge
+
+# 数据全部落在本地目录（release/dev/data/），不挂载命名卷（符合需求：全部映射到本地目录）。
+# 初始化由 init/ 下的脚本在容器健康后自动执行（见 clickhouse-init / kafka-init 服务）。
+# 数据目录已加入 .gitignore（运行时产物，不入库）。
+
+services:
+  # ── ClickHouse：ODS/DWS 分析库 ──
+  clickhouse:
+    image: docker.1ms.run/clickhouse/clickhouse-server:latest
+    container_name: yk-clickhouse
+    restart: unless-stopped
+    ports:
+      - "18123:8123"   # HTTP 接口（pull_client / DBeaver 连这个）
+      - "19000:9000"   # 原生 TCP（kafka-python / 后端连这个）
+    environment:
+      CLICKHOUSE_DB: ykvos
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""        # 测试环境留空；生产务必设强密码
+      CLICKHOUSE_DEFAULT_ACCESS_LEVEL: 040
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      # 本地目录持久化（不用命名卷）
+      - ./data/clickhouse:/var/lib/clickhouse
+      # 初始化 SQL（只读挂载给 init 容器用）
+      - ./clickhouse:/sql:ro
+      # 显式覆盖默认用户的空密码配置，防止新版镜像自动生成随机密码
+      - ./clickhouse/users.d/default-password.xml:/etc/clickhouse-server/users.d/default-password.xml:ro
+    healthcheck:
+      test: ["CMD", "clickhouse", "client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [yknet]
+
+  # ── Kafka：消息缓冲 + 生产链路验证（中继用，非 agent 直推）──
+  # 单节点 KRaft（bitnami 3.4.1）。auto_create_topics=true 便于测试；
+  #   另由 kafka-init 显式建 vos.cdr.live（见 init/ 与 kafka-init 服务）。
+  # 仅本机/容器网络可达（测试服务器无公网端口，外部不可达，符合安全基线）。
+  kafka:
+    image: docker.1ms.run/bitnami/kafka:3.4.1
+    container_name: yk-kafka
+    restart: unless-stopped
+    ports:
+      - "19092:9092"
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      # 本地目录持久化（不用命名卷）
+      - ./data/kafka:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks: [yknet]
+
+  # ── Redis：yudao 后端缓存/会话（后端启用时取消注释）──
+  # redis:
+  #   image: docker.1ms.run/redis:7
+  #   container_name: yk-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   command: ["redis-server", "--appendonly", "yes"]
+  #   networks: [yknet]
+
+  # ── Postgres：yudao 后端业务库（后端启用时取消注释）──
+  # postgres:
+  #   image: docker.1ms.run/postgres:15
+  #   container_name: yk-postgres
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_DB: yudao
+  #     POSTGRES_USER: yudao
+  #     POSTGRES_PASSWORD: yudao123
+  #   volumes:
+  #     - ./data/postgres:/var/lib/postgresql/data
+  #   networks: [yknet]
+
+  # ── 后端(yudao) 运行镜像：pinny3/openjdk21（后端 jar 构建好后启用）──
+  # backend:
+  #   image: pinny3/openjdk21:latest
+  #   container_name: yk-backend
+  #   restart: unless-stopped
+  #   depends_on: [postgres, redis, clickhouse]
+  #   ports:
+  #     - "48080:48080"
+  #   volumes:
+  #     - ./backend/yudao-server/target/yudao-server.jar:/app/app.jar:ro
+  #   command: ["java", "-jar", "/app/app.jar"]
+  #   networks: [yknet]
+
+  # ── 数据端初始化：ClickHouse 建表（ODS + Kafka MV）──
+  # 用 clickhouse 镜像内的 client 连本容器，待 CH 健康后跑 init/ 里的 SQL。
+  # restart: "no" → 跑完即退出，不长期占用；rerun 时 `docker compose up clickhouse-init` 即可。
+  clickhouse-init:
+    image: docker.1ms.run/clickhouse/clickhouse-server:latest
+    container_name: yk-clickhouse-init
+    restart: "no"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./clickhouse:/sql:ro     # 含 01_ods_vos.sql / 02_kafka_ingest.sql
+      - ./init:/init:ro          # 含 init-clickhouse.sh
+    entrypoint: ["/bin/bash", "/init/init-clickhouse.sh"]
+    networks: [yknet]
+
+  # ── 数据端初始化：Kafka 建 topic（vos.cdr.live）──
+  # auto_create_topics 已开，这里显式建好分区/副本，幂等（--if-not-exists）。
+  kafka-init:
+    image: docker.1ms.run/bitnami/kafka:3.4.1
+    container_name: yk-kafka-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./init:/init:ro          # 含 init-kafka.sh
+    entrypoint: ["/bin/bash", "/init/init-kafka.sh"]
+    networks: [yknet]
+
+  # ── 监控页：数据链路健康 / 节点 lag（docker 形式运行，FROM scratch 静态二进制）──
+  # 探测方向：monitor 在平台侧「出站」访问各 VOS 节点 agent 的 /healthz、/v1/watermark，
+  #   以及本机 ClickHouse；平台侧无需暴露入站端口。
+  # 查看：因平台服务器无公网端口，本机用 SSH 隧道转发 -> 浏览器开 http://127.0.0.1:8088
+  #   （ssh -L 8088:127.0.0.1:8088 user@平台服务器）
+  monitor:
+    build:
+      context: ./monitor          # 含预编译 dist/monitor（linux 静态二进制）
+    container_name: yk-monitor
+    restart: unless-stopped
+    ports:
+      - "18088:8088"
+    environment:
+      # 变量来自同目录 .env（docker compose 自动加载）。可 cp .env.example .env 后按实际填写。
+      # 多节点：每台 VOS 一个 agent；name=url，name 即 vos_id（须与 agent 的 instance.id 一致）
+      NODES: "${NODES:-vos1=http://<VOS1公网IP>:5233,vos2=http://<VOS2公网IP>:5233}"
+      CLICKHOUSE_URL: "${CLICKHOUSE_URL:-http://clickhouse:8123}"
+      CH_TABLE: "${CH_TABLE:-vos_cdr_ods}"
+      MONITOR_TOKEN: "${MONITOR_TOKEN:-}"   # 若 agent 启用 Bearer 鉴权，填同值；空=不鉴权（公网端口强烈建议填值）
+      PORT: "${PORT:-8088}"
+      CACHE_SECONDS: "${CACHE_SECONDS:-8}"
+    depends_on:
+      - clickhouse
+    networks: [yknet]

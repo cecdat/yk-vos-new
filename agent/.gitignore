@@ -1,0 +1,13 @@
+# 编译产物
+/ykvos-agent
+/ykvos-agent-*
+*.exe
+
+# 运行时
+config.yaml
+state.json
+logs/
+*.log
+
+# Go
+/vendor/

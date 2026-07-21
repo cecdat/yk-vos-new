@@ -1,0 +1,47 @@
+# Dependency directories
+node_modules/
+**/node_modules/
+target/
+**/target/
+.venv/
+venv/
+*.class
+**/*.class
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build outputs and release files
+*.tar.gz
+**/dist/
+dist/
+*.zip
+*.rar
+
+# Local databases and runtime data directories
+data/
+**/data/
+logs/
+*.log
+
+# Sensitive / environment configurations
+.env
+.env.local
+.env.production.local
+.env.development.local
+.uploads/
+
+# Sandbox / temp files
+scratch/
+temp/
+tmp/

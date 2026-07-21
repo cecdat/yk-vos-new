@@ -1,0 +1,24 @@
+# systemd 单元（规格 §2.3）。安装到 /etc/systemd/system/ykvos-agent.service
+# 密码经密钥文件注入，非 root 运行，崩溃自动拉起。
+[Unit]
+Description=YK-VOS Sync Agent (话单同步)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ykvos-agent/ykvos-agent -config /opt/ykvos-agent/config.yaml -state /opt/ykvos-agent/state.json
+WorkingDirectory=/opt/ykvos-agent
+Restart=always
+RestartSec=5
+User=vosreader
+# 从 .env 文件加载环境变量
+EnvironmentFile=/opt/ykvos-agent/.env
+LimitNOFILE=65536
+# 加固：只读根、私有 tmp（state.json 在 WorkingDirectory，需可写）
+ProtectSystem=strict
+ReadWritePaths=/opt/ykvos-agent
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

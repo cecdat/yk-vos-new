@@ -1,0 +1,39 @@
+#!/bin/sh
+# yk-vos Maven 包装脚本
+# 背景：本机 Git Bash 设了 MSYS_NO_PATHCONV=1，导致 /d/... POSIX 路径
+# 原样传给原生 java.exe（Windows 程序不认），Maven 报
+# "找不到或无法加载主类 org.codehaus.plexus.classworlds.launcher.Launcher"。
+# 此脚本用 cygpath -w 显式把所有路径转成 Windows 格式（D:\...），
+# 并直接启动 classworlds Launcher，完全绕开路径转换问题。
+set -e
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+MAVEN_HOME="$(cd "$HERE/maven" && pwd)"
+
+# 本项目需 JDK17（ruoyi-vue-pro master-jdk17 分支）。
+# 注意：本机默认 JAVA_HOME 指向 JDK11（供其它工具用），此处强制使用 JDK17，
+# 不影响你全局的 JAVA_HOME。如需改 JDK 路径，直接编辑下面这一行。
+JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-17.0.19.10-hotspot"
+JAVACMD="$JAVA_HOME/bin/java"
+
+# classworlds 引导包（按真实位置 boot/ 下查找）
+BOOTJAR="$(find "$MAVEN_HOME/boot" -name 'plexus-classworlds-*.jar' 2>/dev/null | head -1)"
+if [ -z "$BOOTJAR" ]; then
+  echo "ERROR: classworlds jar not found under $MAVEN_HOME/boot" >&2
+  exit 1
+fi
+
+# 关键：全部转成 Windows 路径给 java.exe
+MH="$(cygpath -w "$MAVEN_HOME")"
+BOOT="$(cygpath -w "$BOOTJAR")"
+CONF="$(cygpath -w "$MAVEN_HOME/bin/m2.conf")"
+JANSI="$(cygpath -w "$MAVEN_HOME/lib/jansi-native")"
+BASE="$(cygpath -w "$(pwd)")"
+
+exec "$JAVACMD" \
+  -classpath "$BOOT" \
+  "-Dclassworlds.conf=$CONF" \
+  "-Dmaven.home=$MH" \
+  "-Dlibrary.jansi.path=$JANSI" \
+  "-Dmaven.multiModuleProjectDirectory=$BASE" \
+  org.codehaus.plexus.classworlds.launcher.Launcher "$@"

@@ -1,0 +1,84 @@
+#!/bin/bash
+# chkconfig: 2345 90 10
+# description: YK-VOS 话单同步 agent 服务
+# 对应 docs/VOS同步Agent规格.md 。init.d 形态
+# 安装位置： /etc/init.d/ykvos-agent  （由 deploy/install.sh 拷贝）
+
+APP=ykvos-agent
+APP_DIR=/opt/$APP
+APP_BIN=$APP_DIR/bin/$APP
+CFG=$APP_DIR/etc/config.yaml
+PIDFILE=/var/run/$APP.pid
+LOGFILE=/var/log/$APP.log
+SECRET_MYSQL=$APP_DIR/secrets/mysql
+SECRET_KAFKA=$APP_DIR/secrets/kafka
+
+# 降权运行（可选）。留空则沿用参考形态以 root 运行，保证一键最稳；
+# 设为 vosreader 可降权，但需确保 init.d 环境可用 su（详见 README 加固章节）。
+RUN_AS=""
+
+# 所有业务参数均在 $CFG 中配置（log/state 也在内），运行时不再接收命令行参数。
+start() {
+    echo -n "启动 $APP: "
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "已经在运行"
+        return 1
+    fi
+    cd "$APP_DIR/bin" || return 1
+
+    # 从 .env 文件加载并导出所有环境变量（密码不进 config）
+    if [ -f "$APP_DIR/.env" ]; then
+        set -a
+        . "$APP_DIR/.env"
+        set +a
+    fi
+
+    if [ -n "$RUN_AS" ] && id "$RUN_AS" >/dev/null 2>&1; then
+        su -s /bin/bash "$RUN_AS" -c "cd $APP_DIR/bin && exec $APP_BIN >> $LOGFILE 2>&1" &
+    else
+        nohup "$APP_BIN" >> "$LOGFILE" 2>&1 &
+    fi
+    echo $! > "$PIDFILE"
+    echo "完成 (PID: $(cat "$PIDFILE"))"
+}
+
+stop() {
+    echo -n "停止 $APP: "
+    if [ ! -f "$PIDFILE" ]; then
+        echo "未运行"
+        return 1
+    fi
+    PID=$(cat "$PIDFILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        kill "$PID"
+        [ -n "$RUN_AS" ] && pkill -f "$APP_BIN" 2>/dev/null || true
+        rm -f "$PIDFILE"
+        echo "完成"
+    else
+        echo "进程不存在"
+        rm -f "$PIDFILE"
+    fi
+}
+
+restart() {
+    stop
+    sleep 2
+    start
+}
+
+status() {
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "$APP 正在运行 (PID: $(cat "$PIDFILE"))"
+        return 0
+    fi
+    echo "$APP 已停止"
+    return 3
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) restart ;;
+    status)  status ;;
+    *) echo "用法: $0 {start|stop|restart|status}"; exit 1 ;;
+esac

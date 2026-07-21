@@ -1,0 +1,3 @@
+module yk-vos-monitor
+
+go 1.22

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YK-VOS 数据链路监控</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --line:#e3e8ef; --text:#1f2733;
+          --muted:#6b7585; --ok:#1a8f4d; --bad:#d93636; --warn:#c47f00;
+          --accent:#2f6fed; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background:var(--bg); color:var(--text); font-size:14px; }
+  header { padding:16px 24px; background:var(--card); border-bottom:1px solid var(--line);
+            display:flex; align-items:center; justify-content:space-between; }
+  header h1 { font-size:18px; margin:0; }
+  header .meta { color:var(--muted); font-size:12px; }
+  main { padding:20px 24px; max-width:1100px; margin:0 auto; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+           padding:14px 18px; min-width:180px; flex:1; }
+  .card .k { color:var(--muted); font-size:12px; }
+  .card .v { font-size:24px; font-weight:600; margin-top:4px; }
+  .v.ok { color:var(--ok); } .v.bad { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; background:var(--card);
+          border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th, td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); }
+  th { background:#fafbfc; color:var(--muted); font-weight:600; font-size:12px; }
+  tr:last-child td { border-bottom:none; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+  .pill.up { background:#e6f6ed; color:var(--ok); }
+  .pill.down { background:#fdeaea; color:var(--bad); }
+  .lag-ok { color:var(--ok); font-weight:600; }
+  .lag-warn { color:var(--warn); font-weight:600; }
+  .lag-bad { color:var(--bad); font-weight:600; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .err { color:var(--bad); font-size:12px; }
+  footer { color:var(--muted); font-size:12px; text-align:center; padding:18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>YK-VOS 数据链路监控</h1>
+  <div class="meta" id="gen">加载中…</div>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <table>
+    <thead><tr>
+      <th>节点 (vos_id)</th><th>Agent 端点</th><th>健康</th>
+      <th>Agent 水位</th><th>CH 行数</th><th>CH 水位</th><th>链路 lag</th><th>最后同步</th>
+    </tr></thead>
+    <tbody id="rows"><tr><td colspan="8" style="color:var(--muted)">加载中…</td></tr></tbody>
+  </table>
+</main>
+<footer>每 15 秒自动刷新 · 数据来自各 VOS 节点 agent (/healthz、/v1/watermark) 与 ClickHouse</footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+function pill(up){ return up ? '<span class="pill up">在线</span>' : '<span class="pill down">离线</span>'; }
+function lagClass(l){ return l<=0 ? 'lag-ok' : (l<5000 ? 'lag-warn' : 'lag-bad'); }
+function fmt(n){ return (n===null||n===undefined)?'—':n.toLocaleString('en-US'); }
+
+async function load(){
+  try {
+    const r = await fetch('/api/status', {cache:'no-store'});
+    const s = await r.json();
+    $('#gen').textContent = '生成时间：' + s.generated_at;
+    const chOk = s.clickhouse && s.clickhouse.ok;
+    const allUp = s.ok;
+    $('#cards').innerHTML = `
+      <div class="card"><div class="k">整体状态</div>
+        <div class="v ${allUp?'ok':'bad'}">${allUp?'正常':'异常'}</div></div>
+      <div class="card"><div class="k">ClickHouse</div>
+        <div class="v ${chOk?'ok':'bad'}">${chOk?'可达':'不可达'}</div></div>
+      <div class="card"><div class="k">CH 总话单数</div>
+        <div class="v">${fmt(s.clickhouse? s.clickhouse.total_rows : 0)}</div></div>
+      <div class="card"><div class="k">监控节点数</div>
+        <div class="v">${s.nodes? s.nodes.length : 0}</div></div>`;
+    const tb = $('#rows');
+    if (!s.nodes || s.nodes.length===0){
+      tb.innerHTML = '<tr><td colspan="8" style="color:var(--muted)">未配置节点（NODES 为空）</td></tr>';
+    } else {
+      tb.innerHTML = s.nodes.map(n => `
+        <tr>
+          <td class="mono"><b>${n.name}</b></td>
+          <td class="mono" style="color:var(--muted)">${n.url}</td>
+          <td>${pill(n.healthy)}</td>
+          <td class="mono">${fmt(n.agent_watermark)}</td>
+          <td class="mono">${fmt(n.rows)}</td>
+          <td class="mono">${fmt(n.ch_watermark)}</td>
+          <td class="${lagClass(n.lag)} mono">${fmt(n.lag)}</td>
+          <td class="mono" style="color:var(--muted)">${n.last_sync||'—'}</td>
+        </tr>
+        ${n.error?`<tr><td colspan="8" class="err">⚠ ${n.name}: ${n.error}</td></tr>`:''}
+      `).join('');
+    }
+    if (s.clickhouse && s.clickhouse.error){
+      const p = document.createElement('p');
+      p.className='err'; p.textContent='⚠ ClickHouse: '+s.clickhouse.error;
+      $('#cards').appendChild(p);
+    }
+  } catch(e){
+    $('#gen').textContent = '请求失败：' + e.message;
+  }
+}
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

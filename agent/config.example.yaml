@@ -1,0 +1,112 @@
+# ykvos-agent 配置样例（规格 docs/VOS同步Agent规格.md §3）
+# 安全要点：密码不写在此文件！由环境变量 YK_MYSQL_PWD / YK_KAFKA_PWD 指向密钥文件注入（§9）。
+# 部署：复制为 config.yaml，按现场修改。
+
+# ── 实例标识：标识"这台 VOS"是谁，写进每条消息，供 CH/后端区分来源 ──
+# 多节点：每台 VOS 必须唯一（如 vos1 / vos2），它即 Envelope 的 vos_id，
+#   也是 ClickHouse vos_cdr_ods 去重键 (vos_id, flowno) 的第一列、监控页的节点名。
+instance:
+  id: "vos1"              # 多节点下每台 VOS 唯一；对应监控页 NODES 的 name
+  name: "vos1"
+  local_ip: "127.0.0.1"
+
+# ── VOS MySQL 只读源 ──
+# 测试环境账号：user=vosdev，密码经 YK_MYSQL_PWD 注入（见 docs/测试环境搭建.md）。
+# 生产：改用专用只读账号（仅 GRANT SELECT ON vos3000.*），权限最小化。
+mysql:
+  host: ""
+  port: 3306
+  user: "vosdev"           # 测试 VOS 查询账号；生产替换为 yk_vos_ro 类只读账号
+  # password: 不在此！经 YK_MYSQL_PWD 指向的密钥文件/明文注入（§9）
+  database: "vos3000"
+  charset: "utf8mb4"
+  socket_path: "/home/mysql/mysql.sock"          # 兜底：部分 VOS 仅允许 socket，如 /var/run/mysqld/mysqld.sock
+  read_only: true
+  conn_max_lifetime: 30m
+  max_open_conns: 5        # MyISAM 表锁，克制并发
+
+# ── Kafka（推送模式出站目标；agent 主动连服务端 Kafka 推话单）──
+# 推送模式：填「服务端 Kafka 的 EXTERNAL 广播地址」= 服务端对 VOS 暴露 IP:3001
+#   （对应 compose 里 .env 的 YK_KAFKA_ADVERTISED_HOST；端口固定 3001，宿主映射 3001→容器 3001）。
+kafka:
+  brokers: ["120.226.208.2:3001"]
+  cdr_topic: "vos.cdr.live"
+  realtime_topic: "vos.realtime"
+  compression: "lz4"
+  required_acks: "all"     # 计费话单：丢一天不可接受
+  max_retries: 10
+  sasl:                    # 若 Kafka 集群启用 SASL/SCRAM，填 mechanism/username；password 经 YK_KAFKA_PWD 注入
+    mechanism: ""          # 例 SCRAM-SHA-512；留空=不启用
+    username: ""
+
+# ── 同步调度 ──
+sync:
+  mode: "kafka"           # 【推送模式】= kafka：出站推服务端 Kafka（本项目采用）。off=不推,仅保留 serve 端点
+  interval_seconds: 5      # 滚动表轮询间隔
+  batch_size: 2000         # 单批拉取行数（依 VOS 负载调，100~2000）
+  dim_interval_seconds: 300  # 维度/小表低频轮询间隔（§8.2，后续扩展用）
+  backfill:
+    enabled: true          # 首跑做历史 51 日表回填（§4.2）
+    date_range: ["2026-01-18", "2026-03-09"]  # 空=全量发现
+    parallel: 2            # 回填并行度（MyISAM 表锁，勿过大）
+
+# ── 多表同步声明（§4，替代写死的 e_cdr 单表）──
+# 留空 → 自动按上方 sync: 段生成单表 e_cdr（保持已验证行为，务必兼容）。
+# 每张表独立游标/批次/频率：
+#   name  表名（information_schema 发现的或固定常量；非用户输入，仍做安全校验）
+#   type  cdr      计费话单（e_cdr + 滚动历史日表），按 flowno 水位增量
+#         dimension 维度表（e_customer/e_phone/...），支持 full 全量或 incremental 按 key 增量
+#   mode  （仅 dimension）full=定时整表重放（CH ReplacingMergeTree 去重，幂等）|
+#                      incremental=按 Key 列增量拉取（键列限 id/lastupdatetime/starttime/flowno）
+#   backfill（仅 cdr）首跑回填历史日表
+#   interval_seconds / batch_size 缺省按类型回退（cdr=5/2000，dimension=300/2000）
+tables:
+  - name: "e_cdr"
+    type: "cdr"
+    backfill: true
+  # ── 以下为 Phase1 维度表示例（当前注释，按需开启）──
+  # - name: "e_customer"
+  #   type: "dimension"
+  #   mode: "full"            # 整表定时重放，CH 按 (vos_id,id) 去重
+  #   interval_seconds: 300
+  # - name: "e_phone"
+  #   type: "dimension"
+  #   mode: "incremental"    # 按 id 增量
+  #   key: "id"
+  #   interval_seconds: 60
+
+# ── 入站拉取端点（§3.5 双向 / 测试环境；默认关闭）──
+# 生产拓扑：平台有公网、Kafka 可达 → 保持 listen 空，agent 只用 Kafka 出站（§9 无 inbound 基线）。
+# 测试拓扑：VOS 有公网、平台无公网端口(Kafka 不可达) → 设 listen 让平台主动来拉。
+#   agent 在 VOS 本机起 HTTP 服务，平台侧周期 GET /v1/cdr?table=&after=&limit= 拉取，
+#   返回体与 Kafka 消息同构(model.Envelope)，下游消费逻辑完全复用；游标 after 由客户端维护。
+#   与 Kafka 推送可并存（都开=真·双向）。token 经 YK_SERVER_TOKEN 注入，空=不鉴权（公网端口强烈建议经 YK_SERVER_TOKEN 设值）。
+server:
+  listen: ""                   # 【推送模式】置空=不起入站端点（agent 只出站推 Kafka，无 inbound）。测试拉取拓扑才填 ":5233"
+  token: ""               # 经 YK_SERVER_TOKEN 注入（文件路径或明文），空=不鉴权
+  read_timeout_seconds: 30
+
+# ── VOS Web API（实时并发流；默认并发走 DB 近似，见 §6，可关闭）──
+vos_api:
+  enabled: false
+  base_url: "http://127.0.0.1:2768/external/server"
+  poll_interval_seconds: 10
+  timeout_seconds: 5
+
+# ── ClickHouse 消费侧契约提示（agent 不直接连 CH；仅归档约定）──
+clickhouse_contract:
+  ods_table: "vos_cdr_ods"
+  dedup_key: "flowno"
+  engine: "ReplacingMergeTree(_sync_ts)"
+  partition_by: "toDate(starttime)"
+
+# ── 日志（全部走配置文件，不接收命令行参数）──
+log:
+  level: "info"            # debug|info|warn|error
+  path: ""                # 空=输出到 stdout（由 init.d 重定向到 /var/log/ykvos-agent.log，配合 logrotate）
+                           # 填绝对路径则 agent 自行写文件（缺失自动创建）
+
+# ── 水位持久化（断点续传；§4.3）──
+state:
+  file: "/opt/ykvos-agent/state.json"   # 空=与 config.yaml 同目录 state.json
+
