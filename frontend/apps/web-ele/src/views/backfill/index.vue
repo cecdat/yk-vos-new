@@ -18,7 +18,6 @@ import {
   ElMessage,
   ElRow,
   ElCol,
-  ElStatistic,
   ElDropdown,
   ElDropdownMenu,
   ElDropdownItem,
@@ -79,7 +78,7 @@ const fetchInstances = async () => {
     const res = await getVosInstanceList();
     instances.value = res || [];
     if (instances.value.length > 0) {
-      selectedVosId.value = instances.value[0].vos_id || '';
+      selectedVosId.value = instances.value[0]?.vos_id || '';
     }
   } catch (err: any) {
     ElMessage.error('获取 VOS 实例列表失败: ' + (err.message || err));
@@ -196,7 +195,7 @@ const submitStartBackfill = async () => {
     if (status === 'queued') {
       ElMessage.warning('系统当前同步并发数已满（最大 3），回填任务已进入排队序列。');
     } else {
-      ElMessage.success('回填控制指令下发成功！');
+      ElMessage.success('回填任务创建成功！请在右侧指令控制中心手动下发启动。');
     }
     startDialogVisible.value = false;
     fetchData();
@@ -271,7 +270,7 @@ const submitThrottle = async () => {
 };
 
 // 计算单个日表的百分比进度
-const getProgressPercent = (row: VosInstanceApi.VosAgentBackfill) => {
+const getProgressPercent = (row: any) => {
   if (!row.estimatedRows) return 0;
   const pct = Math.floor((row.alreadyPushed / row.estimatedRows) * 100);
   return pct > 100 ? 100 : pct;
@@ -312,7 +311,7 @@ const getBackfillStatusType = (status: string): "primary" | "success" | "warning
 };
 
 // 日表列悬浮显示字符串
-const tableNames = (row: VosInstanceApi.VosBackfillTask) => {
+const tableNames = (row: any) => {
   return row.tables && row.tables.length ? row.tables.join(', ') : '-';
 };
 </script>
@@ -333,7 +332,7 @@ const tableNames = (row: VosInstanceApi.VosBackfillTask) => {
             />
           </ElSelect>
           <ElButton type="primary" plain @click="handleRescan" :disabled="!selectedVosId">重新扫描可用日表</ElButton>
-          <ElButton type="success" @click="openStartDialog" :disabled="selectedTables.length === 0">启动批量回填</ElButton>
+          <ElButton type="success" @click="openStartDialog" :disabled="selectedTables.length === 0">创建回填任务</ElButton>
         </div>
         <div class="text-sm text-gray-400">
           * 2秒智能自动轮询，实时展现话单行级推送进度与心跳硬件监控
@@ -375,7 +374,7 @@ const tableNames = (row: VosInstanceApi.VosBackfillTask) => {
             height="550"
             @selection-change="handleSelectionChange"
           >
-            <ElTableColumn type="selection" width="55" />
+            <ElTableColumn type="selection" :reserve-selection="true" width="55" />
             <ElTableColumn prop="tableName" label="历史日表" min-width="160" />
             <ElTableColumn label="物理估算行" min-width="120">
               <template #default="{ row }">
@@ -507,7 +506,7 @@ const tableNames = (row: VosInstanceApi.VosBackfillTask) => {
     </ElRow>
 
     <!-- 弹窗：启动回填配置 -->
-    <ElDialog v-model="startDialogVisible" title="🚀 启动历史话单回填任务" width="500px">
+    <ElDialog v-model="startDialogVisible" title="🚀 创建历史话单回填任务" width="500px">
       <ElForm :model="startForm" label-width="120px">
         <ElFormItem label="已选表数量">
           <div class="font-semibold text-blue-500">{{ selectedTables.length }} 张日表</div>
@@ -528,7 +527,7 @@ const tableNames = (row: VosInstanceApi.VosBackfillTask) => {
       </ElForm>
       <template #footer>
         <ElButton @click="startDialogVisible = false">取消</ElButton>
-        <ElButton type="success" @click="submitStartBackfill">下发指令</ElButton>
+        <ElButton type="success" @click="submitStartBackfill">创建任务</ElButton>
       </template>
     </ElDialog>
 
