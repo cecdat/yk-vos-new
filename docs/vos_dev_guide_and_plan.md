@@ -237,12 +237,57 @@ func deleteE164(e164 string) (bool, error) {
 * **后端控制器 (Controller)**：`cn.iocoder.yudao.module.vos.controller.admin.vos`
 * **后端服务 (Service)**：`cn.iocoder.yudao.module.vos.service`
 * **控制指令传输层 (Kafka)**：
-  * 后端发布端：`AgentControlProducer.java`
-  * Agent 接收端：`agent/internal/consumer/control_consumer.go`
+*   主控端：`yudao-module-vos` 下的 `AgentControlProducer.java` (用于向 Kafka `vos.control` 队列发布指令)
+  *   Agent接收端：`agent/internal/consumer/control_consumer.go` (接收控制指令并请求本地 VOS WebExternal 接口)
 
 ---
 
-## 八、 项目版本发布管理与开发排期进度
+## 八、 前端框架设计契合原则 (Frontend Framework Alignment)
+
+为了保证新开发页面与 Ruoyi-Vue-Pro / Vben Admin 现有界面的无缝融合，开发人员在编写前端 Vue 组件时必须遵循以下开发约定：
+
+1. **动态菜单注册与权限控制**：
+   * 所有新增页面的路由、菜单显示及按钮级权限，必须通过后端 MySQL 数据库的 `system_menu` 表（即通过 `ykvos.sql` 或 `fix-vos-menu-upsert.sql`）进行配置，由框架在登录后动态拉取并构建路由树。
+   * **严禁**在前端 `router/routes` 中硬编码写死静态 VOS 菜单路由。
+2. **规范化组件选用**：
+   * 表格、表单、弹窗均采用框架的统一组件适配层。例如表格使用 Vxe-Table（或者框架封装的 `<Grid>` 组件），表单检索区使用标准 `<el-form>` 和内置栅格，杜绝自行编写复杂的原生 HTML 标签或引入第三方 ad-hoc 样式库。
+3. **数据封装与请求层隔离**：
+   * 页面中的所有数据交互方法（Axios 请求），必须统一提取到 `src/api/vos.ts` 中并导包使用，禁止在 Vue 组件文件内部直接编写 `axios.post` 或原生 `fetch`。
+4. **防御性大小写兼容处理**：
+   * 鉴于 ClickHouse JDBC 在执行字段查询时对于 `camelCase` 驼峰和 `snake_case` 下划线转换可能存在底层差异，前端渲染组件时需通过归一化过滤器统一规整字段（如对 `instance_id` 与 `instanceId` 进行归一化兼容），避免产生 `TypeError: cannot read property of undefined` 组件渲染挂起崩溃。
+
+---
+
+## 九、 Go Agent 改造分析与方案设计 (Go Agent Modifying Plan)
+
+### 1. 为什么需要改造 Go Agent？
+当前的 Go Agent（`agent/internal/commander/commander.go`）在 `vos.agent.command` 主题下仅消费并处理了回填控制相关的 8 种 Action 指令（即 `start`, `backfill_start`, `pause`, `resume`, `cancel`, `set_throttle`, `rescan`, `precise_count`）。
+为了实现中台对 VOS 实例的**修改和新增反向控制**，Go Agent 的指令消费者模块必须进行对应的代码升级，扩展核心的 Command 路由分发器。
+
+### 2. 改造实现明细 (Go Agent Modifications)
+Go Agent 需在其控制消息接收协程（`commander.go`）的 `dispatch` 路由逻辑中追加 3 个 Action 处理通道：
+
+* **通道一：可用透支额度调整 (`UPDATE_LIMIT`)**：
+  * Action匹配值：`"UPDATE_LIMIT"`。
+  * 执行逻辑：解析 `Params` 映射中的 `customerId` 与 `limitmoney`。使用 Agent 的本地 MySQL 连接池（`c.db`），执行事务 SQL：
+    ```sql
+    UPDATE e_customer SET limitmoney = ? WHERE id = ?
+    ```
+* **通道二：账号状态锁定/激活 (`SET_STATUS`)**：
+  * Action匹配值：`"SET_STATUS"`。
+  * 执行逻辑：解析 `Params` 中的 `customerId` 与 `status`，向 VOS 本地 MySQL 执行事务更新：
+    ```sql
+    UPDATE e_customer SET status = ? WHERE id = ?
+    ```
+* **通道三：号码资产解绑与回收 (`RECYCLE_PHONE`)**：
+  * Action匹配值：`"RECYCLE_PHONE"`。
+  * 执行逻辑：解析 `Params` 中传入的 E.164 号码数组，循环调用本地 HTTP 接口：
+    `POST http://127.0.0.1:9090/external/server/DeletePhone`
+  * 错误控制：若 HTTP 请求响应的 `retCode != 0`，需捕获异常文本并回传 Ack 到 `vos.agent.report` 中继队列，供中台页面向管理员显示具体报错（如“网关忙，号码回收失败”）。
+
+---
+
+## 十、 项目版本发布管理与开发排期进度
 
 ### 1. 严格版本升级管理规范
 在编译打包生成部署包时，**严禁使用重复的版本号**。每次打包必须递增 Patch（修订号），确保环境升级自愈。
