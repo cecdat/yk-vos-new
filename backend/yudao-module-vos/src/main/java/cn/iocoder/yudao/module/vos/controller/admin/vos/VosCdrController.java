@@ -67,7 +67,7 @@ public class VosCdrController {
 
         // WHERE 条件拼装
         StringBuilder where = new StringBuilder(
-                "WHERE vos_id = ? AND toDate(toDateTime(coalesce(recordstarttime, 0))) BETWEEN ? AND ?");
+                "WHERE vos_id = ? AND toDate(toDateTime(coalesce(recordstarttime, 0) / 1000)) BETWEEN ? AND ?");
         List<Object> params = new ArrayList<>();
         params.add(vosId);
         params.add(begin);

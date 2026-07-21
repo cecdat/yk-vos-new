@@ -3,15 +3,44 @@ import { onMounted, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 
-import { getAgentHeartbeatList, type VosAgentHeartbeat } from '#/api/vos';
+import { getAgentHeartbeatList } from '#/api/vos';
 
 const loading = ref(false);
-const list = ref<VosAgentHeartbeat[]>([]);
+const list = ref<any[]>([]);
+
+/** 字段兼容性处理：无论后端返回驼峰命名还是下划线命名，统一规整为下划线属性以适配模板 */
+function normalizeHeartbeat(h: any) {
+  if (!h) return {};
+  return {
+    vos_id: h.vos_id || h.vosId || '',
+    hostname: h.hostname || '',
+    os: h.os || '',
+    agent_version: h.agent_version || h.agentVersion || '',
+    cpu_load_1m: h.cpu_load_1m !== undefined ? h.cpu_load_1m : (h.cpuLoad1m !== undefined ? h.cpuLoad1m : 0),
+    cpu_cores: h.cpu_cores !== undefined ? h.cpu_cores : (h.cpuCores !== undefined ? h.cpuCores : 1),
+    mem_total_mb: h.mem_total_mb !== undefined ? h.mem_total_mb : (h.memTotalMb !== undefined ? h.memTotalMb : 0),
+    mem_used_mb: h.mem_used_mb !== undefined ? h.mem_used_mb : (h.memUsedMb !== undefined ? h.memUsedMb : 0),
+    disk_total_mb: h.disk_total_mb !== undefined ? h.disk_total_mb : (h.diskTotalMb !== undefined ? h.diskTotalMb : 0),
+    disk_used_mb: h.disk_used_mb !== undefined ? h.disk_used_mb : (h.diskUsedMb !== undefined ? h.diskUsedMb : 0),
+    uptime_seconds: h.uptime_seconds !== undefined ? h.uptime_seconds : (h.uptimeSeconds !== undefined ? h.uptimeSeconds : 0),
+    db_connected: h.db_connected !== undefined ? h.db_connected : (h.dbConnected !== undefined ? h.dbConnected : false),
+    db_version: h.db_version || h.dbVersion || '',
+    db_active_conns: h.db_active_conns !== undefined ? h.db_active_conns : (h.dbActiveConns !== undefined ? h.dbActiveConns : 0),
+    db_max_conns: h.db_max_conns !== undefined ? h.db_max_conns : (h.dbMaxConns !== undefined ? h.dbMaxConns : 0),
+    agent_pid: h.agent_pid !== undefined ? h.agent_pid : (h.agentPid !== undefined ? h.agentPid : 0),
+    agent_goroutines: h.agent_goroutines !== undefined ? h.agent_goroutines : (h.agentGoroutines !== undefined ? h.agentGoroutines : 0),
+    agent_mem_alloc_mb: h.agent_mem_alloc_mb !== undefined ? h.agent_mem_alloc_mb : (h.agentMemAllocMb !== undefined ? h.agentMemAllocMb : 0),
+    agent_uptime_seconds: h.agent_uptime_seconds !== undefined ? h.agent_uptime_seconds : (h.agentUptimeSeconds !== undefined ? h.agentUptimeSeconds : 0),
+    generated_at: h.generated_at || h.generatedAt || ''
+  };
+}
 
 async function load() {
   loading.value = true;
   try {
-    list.value = await getAgentHeartbeatList();
+    const raw = await getAgentHeartbeatList();
+    console.log('getAgentHeartbeatList raw response:', raw);
+    list.value = (raw || []).map(normalizeHeartbeat);
   } finally {
     loading.value = false;
   }
@@ -23,6 +52,12 @@ function pct(used?: number, total?: number): number {
     return 0;
   }
   return Math.min(100, Math.round((used / total) * 100));
+}
+
+/** 格式化内存/磁盘为 GB 并避免 undefined/null 报错 */
+function formatGB(mb?: number): string {
+  if (mb === undefined || mb === null) return '-';
+  return (mb / 1024).toFixed(2);
 }
 
 /** 秒 -> 人类可读运行时长 */
@@ -146,7 +181,7 @@ onMounted(load);
           <div>
             <div class="flex justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400 mb-1">
               <span>内存使用率</span>
-              <span class="text-slate-700 dark:text-zinc-200">{{ (h.mem_used_mb / 1024).toFixed(2) }} / {{ (h.mem_total_mb / 1024).toFixed(2) }} GB ({{ pct(h.mem_used_mb, h.mem_total_mb) }}%)</span>
+              <span class="text-slate-700 dark:text-zinc-200">{{ formatGB(h.mem_used_mb) }} / {{ formatGB(h.mem_total_mb) }} GB ({{ pct(h.mem_used_mb, h.mem_total_mb) }}%)</span>
             </div>
             <ElProgress
               :percentage="pct(h.mem_used_mb, h.mem_total_mb)"
@@ -159,7 +194,7 @@ onMounted(load);
           <div>
             <div class="flex justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400 mb-1">
               <span>磁盘空间</span>
-              <span class="text-slate-700 dark:text-zinc-200">已用 {{ (h.disk_used_mb / 1024).toFixed(2) }} / {{ (h.disk_total_mb / 1024).toFixed(2) }} GB ({{ pct(h.disk_used_mb, h.disk_total_mb) }}%)</span>
+              <span class="text-slate-700 dark:text-zinc-200">已用 {{ formatGB(h.disk_used_mb) }} / {{ formatGB(h.disk_total_mb) }} GB ({{ pct(h.disk_used_mb, h.disk_total_mb) }}%)</span>
             </div>
             <ElProgress
               :percentage="pct(h.disk_used_mb, h.disk_total_mb)"
