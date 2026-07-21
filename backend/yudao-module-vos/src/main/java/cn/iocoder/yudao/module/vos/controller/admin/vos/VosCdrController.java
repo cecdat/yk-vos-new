@@ -166,6 +166,11 @@ public class VosCdrController {
                 java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
                 return sdf.parse(clean.substring(0, 19)).getTime();
             }
+            // Case 6: yyyyMMdd HH:mm:ss (17 chars)
+            if (clean.length() == 17 && clean.contains(" ")) {
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd HH:mm:ss");
+                return sdf.parse(clean).getTime();
+            }
             // Case 5: numeric timestamp
             if (clean.matches("\\d+")) {
                 long val = Long.parseLong(clean);

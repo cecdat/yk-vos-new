@@ -19,8 +19,8 @@ import {
 
 const instances = ref<VosInstanceApi.VosInstance[]>([]);
 const instanceId = ref<number | undefined>(undefined);
-const beginDate = ref<string>(fmtDate(new Date(Date.now() - 7 * 86400000)));
-const endDate = ref<string>(fmtDate(new Date()));
+const beginDate = ref<string>(fmtDateTime(new Date(Date.now() - 7 * 86400000), '00:00:00'));
+const endDate = ref<string>(fmtDateTime(new Date(), '23:59:59'));
 const account = ref('');
 const caller = ref('');
 const callee = ref('');
@@ -29,9 +29,9 @@ const lastMessage = ref('');
 const lastSource = ref('');
 const lastCost = ref(0);
 
-function fmtDate(d: Date): string {
+function fmtDateTime(d: Date, timeStr: string): string {
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${timeStr}`;
 }
 
 async function loadInstances() {
@@ -137,18 +137,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
       </el-select>
       <el-date-picker
         v-model="beginDate"
-        type="date"
-        value-format="YYYY-MM-DD"
-        placeholder="开始日期"
-        style="width: 150px"
+        type="datetime"
+        value-format="YYYY-MM-DD HH:mm:ss"
+        placeholder="开始时间"
+        style="width: 200px"
       />
       <span>~</span>
       <el-date-picker
         v-model="endDate"
-        type="date"
-        value-format="YYYY-MM-DD"
-        placeholder="结束日期"
-        style="width: 150px"
+        type="datetime"
+        value-format="YYYY-MM-DD HH:mm:ss"
+        placeholder="结束时间"
+        style="width: 200px"
       />
       <el-input
         v-model="account"
