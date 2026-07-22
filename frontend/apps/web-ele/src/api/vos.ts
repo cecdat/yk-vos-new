@@ -226,3 +226,19 @@ export function updateCustomerStatus(data: { id: number; status: number }) {
 export function getProfitReport(instanceId: number, data: any) {
   return requestClient.post<any>(`/vos/report/profit-report/${instanceId}`, data);
 }
+
+/** 导出对账单汇总 Excel */
+export function exportProfitReport(instanceId: number, data: any) {
+  return requestClient.download<Blob>(
+    `/vos/report/export-profit-report/${instanceId}`,
+    { method: 'POST', data },
+  );
+}
+
+/** 导出原始话单明细 Excel */
+export function exportCdrDetail(instanceId: number, data: any) {
+  return requestClient.download<Blob>(
+    `/cdr/export-from-vos/${instanceId}`,
+    { method: 'POST', data },
+  );
+}

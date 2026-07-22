@@ -8,10 +8,11 @@ import { Page } from '@vben/common-ui';
 import { ElMessage } from 'element-plus';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getVosInstanceList, getProfitReport } from '#/api/vos';
+import { getVosInstanceList, getProfitReport, exportProfitReport } from '#/api/vos';
 
 const searchVosId = ref('');
 const searchAccount = ref('');
+const exportLoading = ref(false);
 
 // 初始化默认时间范围：7 天前至今天结束
 const now = new Date();
@@ -68,6 +69,48 @@ function handleReset() {
   handleRefresh();
 }
 
+/** 导出对账单 */
+async function handleExport() {
+  if (!searchVosId.value) {
+    ElMessage.warning('请先选择一个 VOS 实例！');
+    return;
+  }
+  if (!timeRange.value || timeRange.value.length < 2) {
+    ElMessage.warning('请先选择时间范围！');
+    return;
+  }
+  const instance = vosInstances.value.find(item => item.vos_id === searchVosId.value);
+  if (!instance) {
+    ElMessage.warning('选中的 VOS 实例不存在！');
+    return;
+  }
+
+  exportLoading.value = true;
+  try {
+    const blob = await exportProfitReport(instance.id, {
+      beginTime: formatTime(timeRange.value[0]),
+      endTime: formatTime(timeRange.value[1]),
+      accounts: searchAccount.value.trim() || undefined,
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+
+    const startStr = formatTime(timeRange.value[0]).replace(/[: ]/g, '_');
+    const endStr = formatTime(timeRange.value[1]).replace(/[: ]/g, '_');
+    link.setAttribute('download', `VOS对账汇总_${instance.name}_${startStr}_至_${endStr}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    ElMessage.success('对账单导出成功！');
+  } catch (e: any) {
+    ElMessage.error(`导出失败: ${e.message || e}`);
+  } finally {
+    exportLoading.value = false;
+  }
+}
+
 // 格式化日期
 function formatTime(dt: Date): string {
   const pad = (num: number) => String(num).padStart(2, '0');
@@ -113,7 +156,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
           if (!instance) {
             return { items: [], total: 0 };
           }
-          
+
           const res = await getProfitReport(instance.id, {
             page: page.currentPage,
             pageSize: page.pageSize,
@@ -183,6 +226,9 @@ onMounted(() => {
           </el-button>
           <el-button @click="handleReset">
             重置
+          </el-button>
+          <el-button :loading="exportLoading" type="success" @click="handleExport">
+            导出对账单
           </el-button>
         </div>
       </template>

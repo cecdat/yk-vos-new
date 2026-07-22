@@ -175,6 +175,34 @@ SELECT
 FROM vos_cdr_kafka
 WHERE src_table = 'e_feerate';
 
+
+-- 6) 财务对账预聚合：每日收益汇总表与物化视图
+CREATE TABLE IF NOT EXISTS vos_profit_daily_ods (
+    vos_id String,
+    date Date,
+    account String,
+    call_count UInt64,
+    billing_duration UInt64,    -- feetime 计费时长（秒）
+    revenue Float64,            -- fee 应收费用
+    cost Float64,               -- agentfee 成本费用
+    _sync_ts DateTime DEFAULT now()
+) ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(date)
+ORDER BY (vos_id, account, date);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS vos_profit_daily_mv TO vos_profit_daily_ods AS
+SELECT
+    vos_id AS vos_id,
+    toDate(recordstarttime / 1000) AS date,
+    customeraccount AS account,
+    count() AS call_count,
+    sum(feetime) AS billing_duration,
+    sum(fee) AS revenue,
+    sum(agentfee) AS cost
+FROM vos_cdr_ods
+GROUP BY vos_id, date, account;
+
+
 -- 3) 校验：查看消费进度 / 落库行数（按节点）
 -- SELECT vos_id, count() FROM vos_cdr_ods GROUP BY vos_id;
 -- SELECT * FROM vos_cdr_ods ORDER BY vos_id, flowno DESC LIMIT 10;

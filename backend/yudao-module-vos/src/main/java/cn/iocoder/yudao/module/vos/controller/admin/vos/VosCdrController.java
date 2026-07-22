@@ -15,6 +15,12 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.annotation.Resource;
 import java.util.*;
 
+import cn.iocoder.yudao.framework.excel.core.util.ExcelUtils;
+import cn.iocoder.yudao.module.vos.controller.admin.vos.vo.VosCdrExcelVO;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.math.BigDecimal;
+
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
 /**
@@ -220,5 +226,117 @@ public class VosCdrController {
         result.put("message", msg);
         result.put("error", msg);
         return result;
+    }
+
+    @PostMapping("/export-from-vos/{instanceId}")
+    @Operation(summary = "导出原始话单明细 Excel")
+    @Parameter(name = "instanceId", description = "VOS 实例主键", required = true)
+    @PreAuthorize("@ss.hasPermission('cdr:query:export')")
+    public void exportCdr(
+            @PathVariable("instanceId") Long instanceId,
+            @RequestBody VosCdrQueryReqVO reqVO,
+            HttpServletResponse response) throws IOException {
+        VosInstanceDO instance = vosInstanceMapper.selectById(instanceId);
+        if (instance == null) {
+            throw new IllegalArgumentException("VOS 实例不存在 (id=" + instanceId + ")");
+        }
+        String vosId = instance.getVosId();
+
+        Long beginMs = parseTimeToMillis(reqVO.getBeginTime(), false);
+        Long endMs = parseTimeToMillis(reqVO.getEndTime(), true);
+        if (beginMs == null || endMs == null) {
+            throw new IllegalArgumentException("时间格式不正确，起止时间不能为空");
+        }
+
+        StringBuilder where = new StringBuilder("WHERE vos_id = ? AND recordstarttime BETWEEN ? AND ?");
+        List<Object> params = new ArrayList<>();
+        params.add(vosId);
+        params.add(beginMs);
+        params.add(endMs);
+
+        List<String> accounts = reqVO.getAccountList();
+        if (!accounts.isEmpty()) {
+            where.append(" AND customeraccount IN (").append(String.join(",", Collections.nCopies(accounts.size(), "?"))).append(")");
+            params.addAll(accounts);
+        }
+        if (reqVO.getCallerE164() != null && !reqVO.getCallerE164().isBlank()) {
+            where.append(" AND callere164 = ?");
+            params.add(reqVO.getCallerE164().trim());
+        }
+        if (reqVO.getCalleeE164() != null && !reqVO.getCalleeE164().isBlank()) {
+            where.append(" AND calleee164 = ?");
+            params.add(reqVO.getCalleeE164().trim());
+        }
+        if (reqVO.getCalleeGateway() != null && !reqVO.getCalleeGateway().isBlank()) {
+            where.append(" AND calleegatewayid = ?");
+            params.add(reqVO.getCalleeGateway().trim());
+        }
+        if (Boolean.TRUE.equals(reqVO.getExcludeZeroFee())) {
+            where.append(" AND fee > 0");
+        }
+
+        // 限制最大导出明细条数，防止内存泄漏（最多 50000 行）
+        String dataSql = "SELECT "
+                + "flowno AS flowNo, "
+                + "customeraccount AS account, "
+                + "calleraccesse164 AS callerAccessE164, "
+                + "calleeaccesse164 AS calleeAccessE164, "
+                + "calleegatewayid AS calleeGateway, "
+                + "starttime AS start, "
+                + "stoptime AS stop, "
+                + "feetime AS feeTime, "
+                + "fee AS fee, "
+                + "agentfee AS agentFee, "
+                + "enddirection AS endDirection, "
+                + "endreason AS endReason "
+                + "FROM vos_cdr_ods " + where
+                + " ORDER BY recordstarttime DESC LIMIT 50000";
+
+        List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(dataSql, params.toArray());
+        List<VosCdrExcelVO> excelList = new ArrayList<>();
+        for (Map<String, Object> map : rows) {
+            excelList.add(new VosCdrExcelVO()
+                    .setFlowNo(getLong(map.get("flowNo")))
+                    .setAccount(getString(map.get("account")))
+                    .setCallerAccessE164(getString(map.get("callerAccessE164")))
+                    .setCalleeAccessE164(getString(map.get("calleeAccessE164")))
+                    .setCalleeGateway(getString(map.get("calleeGateway")))
+                    .setStart(formatDateTimeStr(map.get("start")))
+                    .setStop(formatDateTimeStr(map.get("stop")))
+                    .setFeeTime(getInteger(map.get("feeTime")))
+                    .setFee(getBigDecimal(map.get("fee")))
+                    .setAgentFee(getBigDecimal(map.get("agentFee")))
+                    .setEndDirection(getInteger(map.get("endDirection")))
+                    .setEndReason(getString(map.get("endReason")))
+            );
+        }
+
+        ExcelUtils.write(response, "VOS原始话单明细_" + reqVO.getBeginTime() + "_至_" + reqVO.getEndTime() + ".xls", "明细数据", VosCdrExcelVO.class, excelList);
+    }
+
+    private String getString(Object obj) {
+        return obj == null ? "" : obj.toString();
+    }
+
+    private Long getLong(Object obj) {
+        if (obj == null) return 0L;
+        if (obj instanceof Number) return ((Number) obj).longValue();
+        return Long.parseLong(obj.toString());
+    }
+
+    private Integer getInteger(Object obj) {
+        if (obj == null) return 0;
+        if (obj instanceof Number) return ((Number) obj).intValue();
+        return Integer.parseInt(obj.toString());
+    }
+
+    private BigDecimal getBigDecimal(Object obj) {
+        if (obj == null) return BigDecimal.ZERO;
+        return new BigDecimal(obj.toString()).setScale(4, java.math.RoundingMode.HALF_UP);
+    }
+
+    private String formatDateTimeStr(Object val) {
+        if (val == null) return "-";
+        return val.toString();
     }
 }
