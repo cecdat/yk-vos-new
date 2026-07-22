@@ -136,7 +136,7 @@ public class VosCdrController {
         }
     }
 
-    private static Long parseTimeToMillis(String timeStr, boolean endIfDateOnly) {
+    static Long parseTimeToMillis(String timeStr, boolean endIfDateOnly) {
         if (timeStr == null || timeStr.isBlank()) {
             return null;
         }

@@ -191,3 +191,38 @@ export function getAgentHeartbeatList() {
     '/vos/agents/heartbeat',
   );
 }
+
+/** VOS 客户财务缓存 */
+export interface VosCustomer {
+  id: number;
+  vosId: string;
+  customerId: number;
+  account: string;
+  name: string;
+  money: number;
+  limitmoney: number;
+  todayconsumption: number;
+  status: number;
+  feerategroupId: number | null;
+  createTime?: string;
+}
+
+/** 查询 VOS 客户分页列表 */
+export function getCustomerPage(params: any) {
+  return requestClient.get<any>('/vos/customer/page', { params });
+}
+
+/** 修改客户信用额度 */
+export function updateCustomerLimit(data: { id: number; limitmoney: number }) {
+  return requestClient.put<boolean>('/vos/customer/update-limit', data);
+}
+
+/** 锁定/解锁客户账户 */
+export function updateCustomerStatus(data: { id: number; status: number }) {
+  return requestClient.put<boolean>('/vos/customer/update-status', data);
+}
+
+/** 查询对账对收毛利汇总报表（三合一） */
+export function getProfitReport(instanceId: number, data: any) {
+  return requestClient.post<any>(`/vos/report/profit-report/${instanceId}`, data);
+}
