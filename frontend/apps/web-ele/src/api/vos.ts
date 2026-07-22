@@ -242,3 +242,19 @@ export function exportCdrDetail(instanceId: number, data: any) {
     { method: 'POST', data },
   );
 }
+
+/** 查询 VOS 号码分页列表 */
+export function getPhonePage(params: any) {
+  return requestClient.get<any>('/vos/phone/page', { params });
+}
+
+/** 批量回收号码 */
+export function recyclePhone(data: { instanceId: number; e164s: string[] }) {
+  return requestClient.post<boolean>('/vos/phone/recycle', data);
+}
+
+/** 获取网关并发负载与 KPI 监控看板数据 */
+export function getGatewayLoadReport(instanceId: number) {
+  return requestClient.get<any>(`/vos/gateway/load-report/${instanceId}`);
+}
+
