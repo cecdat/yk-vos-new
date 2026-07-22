@@ -268,6 +268,16 @@ public class AgentReportConsumer {
             return;
         }
 
+        // 拦截并过滤在线反向控制指令，记录执行状态，无需查询回填任务表产生警告
+        String ctrlAction = msg.getAction();
+        if ("update_limit".equalsIgnoreCase(ctrlAction)
+                || "set_status".equalsIgnoreCase(ctrlAction)
+                || "recycle_phone".equalsIgnoreCase(ctrlAction)) {
+            log.info("[AgentReportConsumer] 外部控制指令执行审计完成: commandId={}, action={}, result={}",
+                    msg.getCommandId(), ctrlAction, msg.getResult());
+            return;
+        }
+
         VosAgentBackfillTaskDO task = taskMapper.selectByCommandId(msg.getCommandId());
         if (task == null) {
             // 控制指令复用主任务 commandId：若主任务行尚未落库或属于一次性指令(rescan/precise_count)，忽略即可

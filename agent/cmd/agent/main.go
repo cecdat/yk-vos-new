@@ -134,7 +134,7 @@ func run() error {
 		telemetryMgr := telemetry.NewTelemetryManager(cfg.Instance.ID, src.DB(), cdrSink)
 		// 启动门闸信号：服务端下发 start 指令后由 commander 关闭，main 才启动 puller。
 		startCh := make(chan struct{})
-		cmdMgr := commander.NewCommander(cfg.Instance.ID, src.DB(), cfg.Kafka, cdrSink, backfillWorker, agentScanner, startCh)
+		cmdMgr := commander.NewCommander(cfg.Instance.ID, src.DB(), cfg.Kafka, cfg.VosAPI, cdrSink, backfillWorker, agentScanner, startCh)
 
 		// ── 先启动指令监听与周期心跳：即便 puller 未起，也能收指令、能上报 ──
 		wg.Add(1)

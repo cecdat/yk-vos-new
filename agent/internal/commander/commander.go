@@ -1,11 +1,15 @@
 package commander
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -30,6 +34,7 @@ type Commander struct {
 	vosID          string
 	db             *sql.DB
 	cfg            config.Kafka
+	vosAPICfg      config.VosAPI
 	reader         *kafka.Reader
 	sinker         *sink.KafkaSink
 	backfillWorker *puller.BackfillWorker
@@ -42,6 +47,7 @@ func NewCommander(
 	vosID string,
 	db *sql.DB,
 	cfg config.Kafka,
+	vosAPICfg config.VosAPI,
 	sinker *sink.KafkaSink,
 	backfillWorker *puller.BackfillWorker,
 	scanner *scanner.Scanner,
@@ -60,6 +66,7 @@ func NewCommander(
 		vosID:          vosID,
 		db:             db,
 		cfg:            cfg,
+		vosAPICfg:      vosAPICfg,
 		reader:         reader,
 		sinker:         sinker,
 		backfillWorker: backfillWorker,
@@ -188,9 +195,162 @@ func (c *Commander) dispatch(ctx context.Context, cmd *CommandMessage) error {
 		}
 		return nil
 
+	case "update_limit":
+		if cmd.Params == nil {
+			return errors.New("missing params for update_limit")
+		}
+		custIDVal, ok1 := cmd.Params["customerId"]
+		limitVal, ok2 := cmd.Params["limitmoney"]
+		if !ok1 || !ok2 {
+			return errors.New("missing customerId or limitmoney in params")
+		}
+		var customerID int
+		if f, ok := custIDVal.(float64); ok {
+			customerID = int(f)
+		} else {
+			return fmt.Errorf("invalid customerId type: %T", custIDVal)
+		}
+		var limitmoney float64
+		if f, ok := limitVal.(float64); ok {
+			limitmoney = f
+		} else {
+			return fmt.Errorf("invalid limitmoney type: %T", limitVal)
+		}
+		if limitmoney < -100000.0 || limitmoney > 100000.0 {
+			return fmt.Errorf("limitmoney %f out of safe bounds [-100000, 100000]", limitmoney)
+		}
+		_, err := c.db.ExecContext(ctx, "UPDATE e_customer SET limitmoney = ? WHERE id = ?", limitmoney, customerID)
+		if err != nil {
+			return fmt.Errorf("failed to update limitmoney: %w", err)
+		}
+		log.Printf("[Commander] 额度调整指令执行成功: customerId=%d, limitmoney=%f", customerID, limitmoney)
+		return nil
+
+	case "set_status":
+		if cmd.Params == nil {
+			return errors.New("missing params for set_status")
+		}
+		custIDVal, ok1 := cmd.Params["customerId"]
+		statusVal, ok2 := cmd.Params["status"]
+		if !ok1 || !ok2 {
+			return errors.New("missing customerId or status in params")
+		}
+		var customerID int
+		if f, ok := custIDVal.(float64); ok {
+			customerID = int(f)
+		} else {
+			return fmt.Errorf("invalid customerId type: %T", custIDVal)
+		}
+		var status int
+		if f, ok := statusVal.(float64); ok {
+			status = int(f)
+		} else {
+			return fmt.Errorf("invalid status type: %T", statusVal)
+		}
+		if status != 0 && status != 1 {
+			return fmt.Errorf("invalid status value: %d (only 0 or 1 allowed)", status)
+		}
+		_, err := c.db.ExecContext(ctx, "UPDATE e_customer SET status = ? WHERE id = ?", status, customerID)
+		if err != nil {
+			return fmt.Errorf("failed to update status: %w", err)
+		}
+		log.Printf("[Commander] 客户状态切换成功: customerId=%d, status=%d", customerID, status)
+		return nil
+
+	case "recycle_phone":
+		if cmd.Params == nil {
+			return errors.New("missing params for recycle_phone")
+		}
+		e164sVal, ok := cmd.Params["e164s"]
+		if !ok {
+			return errors.New("missing e164s in params")
+		}
+		var e164s []string
+		if list, ok := e164sVal.([]interface{}); ok {
+			for _, item := range list {
+				if s, ok := item.(string); ok {
+					e164s = append(e164s, s)
+				}
+			}
+		} else {
+			return fmt.Errorf("invalid e164s type: %T", e164sVal)
+		}
+		if len(e164s) == 0 {
+			return errors.New("empty e164s list")
+		}
+		reg, err := regexp.Compile("^[0-9+]{3,20}$")
+		if err != nil {
+			return err
+		}
+		for _, e164 := range e164s {
+			if !reg.MatchString(e164) {
+				return fmt.Errorf("phone %q fails format validation", e164)
+			}
+			err := c.callDeletePhone(ctx, e164)
+			if err != nil {
+				return fmt.Errorf("failed to recycle phone %s: %w", e164, err)
+			}
+		}
+		log.Printf("[Commander] 号码批量回收指令执行成功: count=%d", len(e164s))
+		return nil
+
 	default:
 		return fmt.Errorf("未知指令 action: %s", cmd.Action)
 	}
+}
+
+func (c *Commander) callDeletePhone(ctx context.Context, e164 string) error {
+	baseURL := c.vosAPICfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:9090/external/server"
+	}
+	url := fmt.Sprintf("%s/DeletePhone", baseURL)
+
+	params := map[string]string{
+		"e164": e164,
+	}
+	jsonData, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+
+	client := &http.Client{
+		Timeout: time.Duration(c.vosAPICfg.TimeoutSeconds) * time.Second,
+	}
+	if client.Timeout == 0 {
+		client.Timeout = 5 * time.Second
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("http request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("invalid status code: %d", resp.StatusCode)
+	}
+
+	var vosResult struct {
+		RetCode   int    `json:"retCode"`
+		Exception string `json:"exception"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&vosResult)
+	if err != nil {
+		return fmt.Errorf("failed to decode vos response: %w", err)
+	}
+
+	if vosResult.RetCode != 0 {
+		return fmt.Errorf("vos error: %s (code: %d)", vosResult.Exception, vosResult.RetCode)
+	}
+
+	return nil
 }
 
 func (c *Commander) runPreciseCount(tableName string) {
