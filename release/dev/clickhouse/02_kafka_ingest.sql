@@ -203,6 +203,19 @@ FROM vos_cdr_ods
 GROUP BY vos_id, date, account;
 
 
+-- 2.5) 号码同步物化视图
+CREATE MATERIALIZED VIEW IF NOT EXISTS vos_phone_mv TO vos_phone_ods AS
+SELECT
+    vos_id                               AS vos_id,
+    JSONExtractInt(data, 'id')           AS id,
+    JSONExtractString(data, 'e164')      AS e164,
+    JSONExtractInt(data, 'feerategroup_id') AS feerategroup_id,
+    now()                                AS _sync_ts
+FROM vos_cdr_kafka
+WHERE src_table = 'e_phone';
+
+
+
 -- 3) 校验：查看消费进度 / 落库行数（按节点）
 -- SELECT vos_id, count() FROM vos_cdr_ods GROUP BY vos_id;
 -- SELECT * FROM vos_cdr_ods ORDER BY vos_id, flowno DESC LIMIT 10;

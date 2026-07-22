@@ -194,3 +194,18 @@ SELECT
 FROM vos_cdr_ods
 WHERE recordstarttime IS NOT NULL
 GROUP BY stat_date, customeraccount;
+
+
+-- 7) 号码数据镜像表（多节点：加 vos_id 去重键）
+CREATE TABLE IF NOT EXISTS vos_phone_ods
+(
+    vos_id                   LowCardinality(String),
+    id                       Int32,
+    e164                     Nullable(String),
+    feerategroup_id          Nullable(Int32),
+    _sync_ts                 DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(_sync_ts)
+ORDER BY (vos_id, id)
+SETTINGS index_granularity = 8192;
+
