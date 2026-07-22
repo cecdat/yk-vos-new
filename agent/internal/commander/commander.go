@@ -219,11 +219,22 @@ func (c *Commander) dispatch(ctx context.Context, cmd *CommandMessage) error {
 		if limitmoney < -100000.0 || limitmoney > 100000.0 {
 			return fmt.Errorf("limitmoney %f out of safe bounds [-100000, 100000]", limitmoney)
 		}
-		_, err := c.db.ExecContext(ctx, "UPDATE e_customer SET limitmoney = ? WHERE id = ?", limitmoney, customerID)
-		if err != nil {
-			return fmt.Errorf("failed to update limitmoney: %w", err)
+
+		var account string
+		if accountVal, ok := cmd.Params["account"].(string); ok && accountVal != "" {
+			account = accountVal
+		} else {
+			err := c.db.QueryRowContext(ctx, "SELECT account FROM e_customer WHERE id = ?", customerID).Scan(&account)
+			if err != nil {
+				return fmt.Errorf("failed to query customer account for id %d: %w", customerID, err)
+			}
 		}
-		log.Printf("[Commander] 额度调整指令执行成功: customerId=%d, limitmoney=%f", customerID, limitmoney)
+
+		err := c.callModifyCustomer(ctx, account, &limitmoney, nil)
+		if err != nil {
+			return fmt.Errorf("failed to call ModifyCustomer limit: %w", err)
+		}
+		log.Printf("[Commander] 额度调整 API 指令下发成功: account=%s, limitmoney=%f", account, limitmoney)
 		return nil
 
 	case "set_status":
@@ -250,11 +261,22 @@ func (c *Commander) dispatch(ctx context.Context, cmd *CommandMessage) error {
 		if status != 0 && status != 1 {
 			return fmt.Errorf("invalid status value: %d (only 0 or 1 allowed)", status)
 		}
-		_, err := c.db.ExecContext(ctx, "UPDATE e_customer SET status = ? WHERE id = ?", status, customerID)
-		if err != nil {
-			return fmt.Errorf("failed to update status: %w", err)
+
+		var account string
+		if accountVal, ok := cmd.Params["account"].(string); ok && accountVal != "" {
+			account = accountVal
+		} else {
+			err := c.db.QueryRowContext(ctx, "SELECT account FROM e_customer WHERE id = ?", customerID).Scan(&account)
+			if err != nil {
+				return fmt.Errorf("failed to query customer account for id %d: %w", customerID, err)
+			}
 		}
-		log.Printf("[Commander] 客户状态切换成功: customerId=%d, status=%d", customerID, status)
+
+		err := c.callModifyCustomer(ctx, account, nil, &status)
+		if err != nil {
+			return fmt.Errorf("failed to call ModifyCustomer status: %w", err)
+		}
+		log.Printf("[Commander] 客户状态切换 API 指令下发成功: account=%s, status=%d", account, status)
 		return nil
 
 	case "recycle_phone":
@@ -408,3 +430,64 @@ func (c *Commander) sendAck(commandID, action string, err error) {
 		log.Printf("[Commander] 指令 ACK 上报成功: commandId=%s, result=%s", commandID, result)
 	}
 }
+
+func (c *Commander) callModifyCustomer(ctx context.Context, account string, limitVal *float64, statusVal *int) error {
+	baseURL := c.vosAPICfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:9090/external/server"
+	}
+	url := fmt.Sprintf("%s/ModifyCustomer", baseURL)
+
+	params := map[string]interface{}{
+		"account": account,
+	}
+	if limitVal != nil {
+		params["limitmoney"] = *limitVal
+	}
+	if statusVal != nil {
+		params["status"] = *statusVal
+	}
+
+	jsonData, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+
+	client := &http.Client{
+		Timeout: time.Duration(c.vosAPICfg.TimeoutSeconds) * time.Second,
+	}
+	if client.Timeout == 0 {
+		client.Timeout = 5 * time.Second
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("http error: status %d", resp.StatusCode)
+	}
+
+	var vosResult struct {
+		RetCode   int    `json:"retCode"`
+		Exception string `json:"exception"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&vosResult); err != nil {
+		return err
+	}
+
+	if vosResult.RetCode != 0 {
+		return fmt.Errorf("vos error: %s (code: %d)", vosResult.Exception, vosResult.RetCode)
+	}
+
+	return nil
+}
+
